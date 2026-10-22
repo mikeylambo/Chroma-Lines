@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "requiredFiles": [
+    "src/main.ts",
+    "index.html"
+  ],
+  "requiredScripts": [
+    "build",
+    "check",
+    "verify"
+  ],
+  "declarations": [
+    "web-runtime",
+    "controller-ui",
+    "production-services",
+    "release-manifest"
+  ],
+  "forbiddenSourceTokens": [
+    "TODO_PLAYER",
+    "PLACEHOLDER_PLAYER",
+    "LOREM_IPSUM"
+  ],
+  "profiles": {
+    "web": {
+      "requiredDeclarations": [
+        "web-runtime"
+      ]
+    },
+    "controller": {
+      "requiredDeclarations": [
+        "controller-ui"
+      ]
+    },
+    "mobile": {
+      "requiredDeclarations": [
+        "touch-gameplay"
+      ]
+    },
+    "release": {
+      "requiredFiles": [
+        "AGENTS.md",
+        "release-manifest.json"
+      ],
+      "requiredDeclarations": [
+        "web-runtime",
+        "production-services",
+        "release-manifest"
+      ],
+      "requiredJsonFields": {
+        "release-manifest.json": [
+          "gameId",
+          "version",
+          "channel",
+          "renderer",
+          "frames",
+          "supportedInputs",
+          "supportedLocales"
+        ]
+      }
+    }
+  }
+}

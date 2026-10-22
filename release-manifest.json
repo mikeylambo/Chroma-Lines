@@ -1,0 +1,18 @@
+{
+  "gameId": "chroma-lines",
+  "version": "0.1.0",
+  "channel": "development",
+  "demo": false,
+  "renderer": "phaser",
+  "frames": [
+    "puzzle"
+  ],
+  "supportedInputs": [
+    "keyboard-mouse",
+    "gamepad"
+  ],
+  "supportedLocales": [
+    "en"
+  ],
+  "requiredFeatures": []
+}
