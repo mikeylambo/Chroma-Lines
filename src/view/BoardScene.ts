@@ -593,7 +593,6 @@ export class BoardScene extends Phaser.Scene {
       g.lineStyle(gw, glowColor, gA); stroke(g, px);
       g.fillStyle(glowColor, gA);
       g.fillCircle(px[0]!.x, px[0]!.y, gw / 2);
-      g.fillCircle(hp.x, hp.y, gw / 2);
     } else {
       // No blur pass: an opaque, pre-mixed halo with round joints (no doubled alpha at corners).
       const gw = cs * 0.38, halo = mix(BG.top, glowColor, Math.min(0.6, 0.28 * bright));
@@ -628,17 +627,28 @@ export class BoardScene extends Phaser.Scene {
     const s = this.cs * (strong ? 1.1 : 1);
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
-    // Solid heads sized inside their cell (Arrow-style): crisp, no outline, no overlap.
-    const head = mix(color, 0xffffff, 0.25);
-    c.fillStyle(head, a);
-    if (style.head === "chevron") {
-      c.fillPoints([at(0.46, 0), at(-0.06, 0.36), at(-0.06, -0.36)], true, true);
-    } else if (style.head === "diamond") {
-      c.fillPoints([at(0.46, 0), at(0.1, 0.32), at(-0.24, 0), at(0.1, -0.32)], true, true);
+    // Classic arrowheads in the line's own colour, starting where the line ends (cell centre)
+    // and stopping inside the cell: one continuous arrow, never overlapping a neighbour.
+    // Three silhouettes keep colours distinguishable without relying on hue.
+    // The bend sits at the cell centre; a short shaft carries the line to the head, whose tip
+    // stops just inside the cell edge — so turned heads read as a clean "L into arrow".
+    const w = this.cs * STROKE;
+    const base = 0.12, tip = 0.48;
+    const mid = at(0, 0), sh = at(base + 0.04, 0);
+    c.lineStyle(w, color, a);
+    c.lineBetween(mid.x, mid.y, sh.x, sh.y);
+    c.fillStyle(color, a);
+    if (style.head === "solid") {
+      c.fillPoints([at(tip, 0), at(base, 0.28), at(base, -0.28)], true, true);
+    } else if (style.head === "barbed") {
+      c.fillPoints([at(tip, 0), at(base - 0.03, 0.3), at(base + 0.1, 0), at(base - 0.03, -0.3)], true, true);
     } else {
-      const o = at(0.02, 0);
-      c.fillCircle(o.x, o.y, s * 0.25);
-      c.fillPoints([at(0.44, 0), at(0.1, 0.2), at(0.1, -0.2)], true, true);
+      // Open chevron: strokes the same weight as the line.
+      const t = at(tip - 0.04, 0), l = at(base + 0.02, 0.26), r = at(base + 0.02, -0.26);
+      c.lineBetween(sh.x, sh.y, t.x, t.y);
+      c.lineBetween(l.x, l.y, t.x, t.y);
+      c.lineBetween(r.x, r.y, t.x, t.y);
+      for (const q of [t, l, r]) c.fillCircle(q.x, q.y, w / 2);
     }
   }
 
