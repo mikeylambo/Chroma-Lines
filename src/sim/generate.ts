@@ -64,6 +64,10 @@ export function generate(p: GenParams, seed: number): Board {
       if (!isOpen(c)) continue;
       const cx = c % w, cy = (c / w) | 0;
       for (let d = 0 as Dir; d < 4; d = (d + 1) as Dir) {
+        // Need room straight behind the head for its shaft — no lone one-cell arrows.
+        const bx = cx - DX[d], by = cy - DY[d];
+        const roomBehind = bx >= 0 && by >= 0 && bx < w && by < h && isOpen(by * w + bx);
+        if (!roomBehind) continue;
         let x = cx + DX[d], y = cy + DY[d];
         let len = 0, same = 0, ok = true;
         while (x >= 0 && y >= 0 && x < w && y < h) {
@@ -103,7 +107,8 @@ export function generate(p: GenParams, seed: number): Board {
       const straight = heading;
       const left = ((heading + 3) % 4) as Dir;
       const right = ((heading + 1) % 4) as Dir;
-      const order: Dir[] = rng.chance(turnBias)
+      // First step runs straight back from the head: every arrowhead continues its last segment.
+      const order: Dir[] = cells.length === 1 ? [straight] : rng.chance(turnBias)
         ? (rng.chance(0.5) ? [left, right, straight] : [right, left, straight])
         : (rng.chance(0.5) ? [straight, left, right] : [straight, right, left]);
       let moved = false;
@@ -118,7 +123,7 @@ export function generate(p: GenParams, seed: number): Board {
       if (!moved) break;
     }
 
-    const floor = failures > 30 ? 1 : Math.min(p.minLen, 2);
+    const floor = 2;
     if (cells.length < floor) { failures++; continue; }
 
     const id = lines.length;

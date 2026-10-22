@@ -144,7 +144,7 @@ export class BoardScene extends Phaser.Scene {
     // All line glow strokes live in one additive layer, softened by a single blur pass.
     this.glowLayer = this.add.layer().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     if (!this.fxOn) this.glowLayer.setBlendMode(Phaser.BlendModes.NORMAL);
-    if (this.fxOn) this.blur = this.glowLayer.postFX.addBlur(0, 2, 2, this.dpr * 1.25, 0xffffff, 2);
+    if (this.fxOn) this.blur = this.glowLayer.postFX.addBlur(1, 2, 2, this.dpr * 0.95, 0xffffff, 3);
     const W = this.scale.width, H = this.scale.height;
     this.bakeGlow = this.make.renderTexture({ x: 0, y: 0, width: W, height: H }, false).setOrigin(0);
     this.glowLayer.add(this.bakeGlow);
