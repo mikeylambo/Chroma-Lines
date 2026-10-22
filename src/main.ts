@@ -114,22 +114,43 @@ function scheduleTutorialCue(): void {
   }, delay);
 }
 
-/** First chroma board: a ghost of the free line slides through its own colour. */
-function maybeDemoPassThrough(): void {
-  if (current.def.kind !== "campaign" || current.def.index !== 11 || progress.data.seen.aha) return;
+/**
+ * Pass-through teaching, wordless. First chroma board: a ghost slides through its own colour.
+ * Until the player has made a few pass-through clears themselves, the ghost replays on any
+ * chroma board after a mistake or a long hesitation (once per board).
+ */
+const PASS_LEARNED = 3;
+let demoShown = false;
+let demoIdleTimer = 0;
+function playPassDemo(delay: number): boolean {
   const st = session.state;
   const pick = st.freeLines().find((i) => st.passThrough(i).length > 0);
-  if (pick === undefined) return;
-  const play = (n: number) => {
+  if (pick === undefined) return false;
+  demoShown = true;
+  const play = (n: number, wait: number) => {
     demoTimer = window.setTimeout(() => {
       if (ended || paused || !st.alive[pick]) return;
       scene.demoPassThrough(pick, st.passThrough(pick));
-      if (n > 1) play(n - 1);
-    }, n === 2 ? 1100 : 2000);
+      if (n > 1) play(n - 1, 2000);
+    }, wait);
   };
-  play(2);
-  progress.data.seen.aha = true;
-  void progress.save();
+  play(2, delay);
+  return true;
+}
+function maybeDemoPassThrough(): void {
+  demoShown = false;
+  clearTimeout(demoIdleTimer);
+  if (current.board.rule !== "chroma") return;
+  if (current.def.kind === "campaign" && current.def.index === 11 && !progress.data.seen.aha) {
+    if (playPassDemo(1100)) { progress.data.seen.aha = true; void progress.save(); }
+    return;
+  }
+  armPassIdle();
+}
+function armPassIdle(): void {
+  clearTimeout(demoIdleTimer);
+  if (demoShown || current.board.rule !== "chroma" || progress.data.seen.passClears >= PASS_LEARNED) return;
+  demoIdleTimer = window.setTimeout(() => { if (!ended && !paused) playPassDemo(0); }, 9000);
 }
 
 function onTap(line: number): void {
@@ -145,6 +166,8 @@ function onTap(line: number): void {
     combo = now - lastClearAt <= COMBO_WINDOW ? combo + 1 : 0;
     lastClearAt = now;
     scene.exit(line, r.passThrough);
+    if (r.passThrough.length && progress.data.seen.passClears < PASS_LEARNED) progress.data.seen.passClears++;
+    armPassIdle();
     audio.clear(combo);
     haptics.pulse("clear");
     const color = current.board.rule === "mono" ? "#d9fbff" : CSS_COLORS[current.board.lines[line]!.color] ?? "#fff";
@@ -160,7 +183,10 @@ function onTap(line: number): void {
     telemetry.emit("tap_blocked", { line, blocker: r.blocker });
     telemetry.emit("life_lost", { lives: r.lives });
     if (r.failed) fail();
-    else scheduleTutorialCue();
+    else {
+      scheduleTutorialCue();
+      if (!demoShown && current.board.rule === "chroma" && progress.data.seen.passClears < PASS_LEARNED) { clearTimeout(demoIdleTimer); playPassDemo(700); }
+    }
   }
   debug?.update(current, session);
 }

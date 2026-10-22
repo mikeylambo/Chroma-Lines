@@ -1,6 +1,7 @@
 import type { AudioSystem } from "@slu/web-shell";
 import { AUDIO_CATALOG, PENTATONIC } from "./catalog.ts";
 
+const MASTER = 0.75;
 const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 
 /**
@@ -30,9 +31,10 @@ export class SynthAudio implements AudioSystem {
     const ctx = new Ctor({ latencyHint: "interactive" });
     this.ctx = ctx;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -14; comp.ratio.value = 3; comp.attack.value = 0.004; comp.release.value = 0.2;
+    // Safety limiter only — a lower threshold pumped the pad under every pluck.
+    comp.threshold.value = -4; comp.knee.value = 6; comp.ratio.value = 4; comp.attack.value = 0.003; comp.release.value = 0.25;
     this.master = ctx.createGain();
-    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.master.gain.value = this.muted || this.paused ? 0 : MASTER;
     this.master.connect(comp).connect(ctx.destination);
     this.sfx = ctx.createGain(); this.sfx.gain.value = 0.8; this.sfx.connect(this.master);
     this.music = ctx.createGain(); this.music.gain.value = 0.55; this.music.connect(this.master);
@@ -69,11 +71,29 @@ export class SynthAudio implements AudioSystem {
   }
   setMuted(muted: boolean): void {
     this.muted = muted;
-    if (this.ctx) this.master.gain.setTargetAtTime(muted ? 0 : 0.9, this.ctx.currentTime, 0.04);
+    this.applyGain();
   }
   get isMuted(): boolean { return this.muted; }
-  pauseAll(): void { this.paused = true; void this.ctx?.suspend(); }
-  resumeAll(): void { this.paused = false; void this.ctx?.resume(); }
+  // Fade, then suspend: no clicks, no stutter when tabs swap focus rapidly.
+  pauseAll(): void {
+    this.paused = true;
+    this.applyGain();
+    clearTimeout(this.suspendTimer);
+    this.suspendTimer = window.setTimeout(() => { if (this.paused) void this.ctx?.suspend(); }, 400);
+  }
+  resumeAll(): void {
+    this.paused = false;
+    clearTimeout(this.suspendTimer);
+    void this.ctx?.resume().then(() => this.applyGain());
+  }
+  private suspendTimer = 0;
+  private applyGain(): void {
+    if (!this.ctx) return;
+    const g = this.master.gain, t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setValueAtTime(g.value, t);
+    g.setTargetAtTime(this.muted || this.paused ? 0 : MASTER, t, 0.08);
+  }
 
   // --- Pad ---
   private startPad(): void {
@@ -106,7 +126,7 @@ export class SynthAudio implements AudioSystem {
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.07;
     const lfoAmt = ctx.createGain(); lfoAmt.gain.value = 220;
     lfo.connect(lfoAmt).connect(filter.frequency); lfo.start();
-    const level = ctx.createGain(); level.gain.value = 0.045;
+    const level = ctx.createGain(); level.gain.value = 0.032;
     filter.connect(level).connect(g);
     level.connect(this.verb);
     for (const [deg, det] of [[0, -7], [0, 6], [7, 3], [12 + 4, -4], [-12, 0]] as const) {

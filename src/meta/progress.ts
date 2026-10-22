@@ -16,7 +16,7 @@ export interface SaveData {
   hints: number;
   daily: { lastKey: string | null; lastPlayedKey: string | null; streak: number; best: number };
   settings: Settings;
-  seen: { aha: boolean };
+  seen: { aha: boolean; passClears: number };
 }
 
 export const DEFAULT_SAVE: SaveData = {
@@ -26,7 +26,7 @@ export const DEFAULT_SAVE: SaveData = {
   hints: 3,
   daily: { lastKey: null, lastPlayedKey: null, streak: 0, best: 0 },
   settings: { muted: false, colorAssist: false, haptics: true },
-  seen: { aha: false },
+  seen: { aha: false, passClears: 0 },
 };
 
 /** Fill any fields missing from older saves with defaults (never drop player state). */

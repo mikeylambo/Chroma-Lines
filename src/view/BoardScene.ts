@@ -138,6 +138,7 @@ export class BoardScene extends Phaser.Scene {
     this.layer = this.add.container(0, 0);
     // All line glow strokes live in one additive layer, softened by a single blur pass.
     this.glowLayer = this.add.layer().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
+    if (!this.fxOn) this.glowLayer.setBlendMode(Phaser.BlendModes.NORMAL);
     if (this.fxOn) this.blur = this.glowLayer.postFX.addBlur(0, 2, 2, this.dpr * 1.25, 0xffffff, 2);
     const W = this.scale.width, H = this.scale.height;
     this.bakeGlow = this.make.renderTexture({ x: 0, y: 0, width: W, height: H }, false).setOrigin(0);
@@ -580,12 +581,19 @@ export class BoardScene extends Phaser.Scene {
     const ga = 1;
     // Additive outer glow.
     const hp = px[px.length - 1]!;
-    const gw = cs * (this.fxOn ? 0.78 : 0.7);
-    const gA = Math.min(1, (this.fxOn ? 0.42 : 0.16) * bright) * ga;
-    g.lineStyle(gw, glowColor, gA); stroke(g, px);
-    g.fillStyle(glowColor, gA);
-    g.fillCircle(px[0]!.x, px[0]!.y, gw / 2);
-    g.fillCircle(hp.x, hp.y, gw / 2);
+    if (this.fxOn) {
+      const gw = cs * 0.78, gA = Math.min(1, 0.42 * bright) * ga;
+      g.lineStyle(gw, glowColor, gA); stroke(g, px);
+      g.fillStyle(glowColor, gA);
+      g.fillCircle(px[0]!.x, px[0]!.y, gw / 2);
+      g.fillCircle(hp.x, hp.y, gw / 2);
+    } else {
+      // No blur pass: an opaque, pre-mixed halo with round joints (no doubled alpha at corners).
+      const gw = cs * 0.66, halo = mix(BG.top, glowColor, Math.min(0.6, 0.24 * bright));
+      g.lineStyle(gw, halo, 1); stroke(g, px);
+      g.fillStyle(halo, 1);
+      for (const p of px) g.fillCircle(p.x, p.y, gw / 2);
+    }
 
     // Rounded core.
     const w = cs * STROKE;
@@ -613,26 +621,31 @@ export class BoardScene extends Phaser.Scene {
     const s = this.cs * (strong ? 1.1 : 1);
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
-    const head = mix(color, 0xffffff, 0.45);
-    const dark = 0x070a18;
-    const chev = (u0: number, size: number, width: number, col: number, alpha: number) => {
-      c.lineStyle(width, col, alpha);
+    const head = mix(color, 0xffffff, 0.7);
+    const dark = 0x050814;
+    const key = s * 0.085; // dark keyline separating the head from its own body
+    const shape = (pts: Pt[]) => {
+      c.lineStyle(key, dark, 0.9 * a); c.strokePoints(pts, true, true);
+      c.fillStyle(head, a); c.fillPoints(pts, true, true);
+    };
+    const chev = (u0: number, size: number, width: number) => {
+      c.lineStyle(width, dark, 0.9 * a);
       c.beginPath();
-      const a1 = at(u0 - size, size), a2 = at(u0 + size * 0.6, 0), a3 = at(u0 - size, -size);
+      const a1 = at(u0 - size, size * 1.05), a2 = at(u0 + size * 0.7, 0), a3 = at(u0 - size, -size * 1.05);
       c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.lineTo(a3.x, a3.y);
       c.strokePath();
     };
     if (style.head === "chevron") {
-      c.fillStyle(head, a);
-      c.fillPoints([at(0.42, 0), at(-0.02, 0.34), at(0.1, 0), at(-0.02, -0.34)], true);
+      // Crisp arrowhead, wider than the body so direction reads at a glance.
+      shape([at(0.5, 0), at(-0.04, 0.4), at(0.08, 0), at(-0.04, -0.4)]);
     } else if (style.head === "diamond") {
-      c.fillStyle(head, a);
-      c.fillPoints([at(0.48, 0), at(0.08, 0.34), at(-0.26, 0), at(0.08, -0.34)], true);
-      chev(0.1, 0.12, s * 0.065, dark, 0.8 * a);
+      shape([at(0.52, 0), at(0.1, 0.36), at(-0.26, 0), at(0.1, -0.36)]);
+      chev(0.12, 0.13, s * 0.075);
     } else {
-      c.fillStyle(head, a);
-      c.fillCircle(at(0.1, 0).x, at(0.1, 0).y, s * 0.34);
-      chev(0.1, 0.12, s * 0.065, dark, 0.8 * a);
+      const cx = at(0.1, 0);
+      c.fillStyle(dark, 0.9 * a); c.fillCircle(cx.x, cx.y, s * 0.37 + key / 2);
+      c.fillStyle(head, a); c.fillCircle(cx.x, cx.y, s * 0.35);
+      chev(0.1, 0.13, s * 0.075);
     }
   }
 
@@ -660,6 +673,7 @@ export class BoardScene extends Phaser.Scene {
       this.glowLayer.postFX.remove(this.blur);
       this.blur = null;
       this.fxOn = false;
+      this.glowLayer.setBlendMode(Phaser.BlendModes.NORMAL);
       this.views.forEach((v) => (v.dirty = true));
     }
   }
