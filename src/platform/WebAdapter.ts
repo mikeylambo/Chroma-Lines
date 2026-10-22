@@ -25,7 +25,9 @@ export class WebAdapter implements PlatformAdapter {
       for (const cb of document.hidden ? this.pauseCbs : this.resumeCbs) cb();
     });
   }
+  firstFrame(): void { /* web: nothing to signal */ }
   gameReady(): void { /* web: nothing to signal */ }
+  language(): string { return navigator.language || "en"; }
   onPause(cb: () => void): void { this.pauseCbs.push(cb); }
   onResume(cb: () => void): void { this.resumeCbs.push(cb); }
   onAudioToggle(_cb: (enabled: boolean) => void): void { /* web: in-game toggle only */ }

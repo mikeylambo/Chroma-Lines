@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { AudioLifecycleCoordinator, BrowserHaptics } from "@slu/web-shell";
 import "./view/ui.css";
 import { SynthAudio } from "./audio/engine.ts";
-import { CAMPAIGN_LENGTH } from "./content/curveSpec.ts";
+import { AHA_LEVEL, CAMPAIGN_LENGTH } from "./content/curveSpec.ts";
 import { DailyLight } from "./meta/daily.ts";
 import { HintEconomy } from "./meta/hints.ts";
 import { endlessBoard, endlessPoints, type LevelKind, type LoadedLevel, loadLevel } from "./meta/levels.ts";
@@ -13,6 +13,7 @@ import { PlaySession } from "./sim/session.ts";
 import { criticalMove, solve } from "./sim/solve.ts";
 import { BoardScene } from "./view/BoardScene.ts";
 import { mountDebug, type DebugOverlay } from "./view/debug.ts";
+import { renderShareCard, shareCard } from "./view/shareCard.ts";
 import { CSS_COLORS } from "./view/palette.ts";
 import { UI } from "./view/ui.ts";
 
@@ -44,6 +45,7 @@ let cueTimer = 0;
 let demoTimer = 0;
 let levelStartAt = 0;
 let capT = 0;
+let boardPasses = 0; // lines cleared this board by passing through their own colour
 const cache = new Map<string, LoadedLevel>();
 
 function keyOf(kind: LevelKind, index: number): string { return kind === "daily" ? `daily:${daily.key}` : `${kind}:${index}`; }
@@ -80,6 +82,7 @@ function start(level: LoadedLevel): void {
   ended = false;
   paused = false;
   lastTapAt = levelStartAt = performance.now();
+  boardPasses = 0;
   clearTimeout(cueTimer);
   clearTimeout(demoTimer);
   ui.close();
@@ -189,7 +192,7 @@ function maybeDemoPassThrough(): void {
   demoShown = false;
   clearTimeout(demoIdleTimer);
   if (current.board.rule !== "chroma") return;
-  if (current.def.kind === "campaign" && current.def.index === 11 && !progress.data.seen.aha) {
+  if (current.def.kind === "campaign" && current.def.index === AHA_LEVEL && !progress.data.seen.aha) {
     if (playPassDemo(1100)) { progress.data.seen.aha = true; void progress.save(); }
     return;
   }
@@ -214,6 +217,7 @@ function onTap(line: number): void {
     combo = now - lastClearAt <= COMBO_WINDOW ? combo + 1 : 0;
     lastClearAt = now;
     scene.exit(line, r.passThrough);
+    if (r.passThrough.length) boardPasses++;
     if (r.passThrough.length && progress.data.seen.passClears < PASS_LEARNED) progress.data.seen.passClears++;
     armPassIdle();
     audio.clear(combo);
@@ -254,7 +258,7 @@ function win(): void {
     telemetry.emit("daily_complete", { stars, streak: daily.streak });
   } else if (def.kind === "endless") {
     const e = progress.data.endless, run = e.run!;
-    const points = endlessPoints(current.board, def.index, session.mistakes);
+    const points = endlessPoints(current.board, def.index, session.mistakes, boardPasses);
     run.score += points;
     run.n = def.index + 1;
     run.lives = session.lives;
@@ -279,9 +283,8 @@ function win(): void {
 function shareDaily(stars: number): void {
   const day = daily.key.replace("daily:", "");
   const text = `Chroma Lines · Daily Light ${day}\n${"★".repeat(stars)}${"☆".repeat(3 - stars)}  🔥${daily.streak}\n${location.origin}`;
-  const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
-  if (nav.share) void nav.share({ text }).catch(() => undefined);
-  else void navigator.clipboard?.writeText(text).then(() => ui.toast("✓"), () => undefined);
+  const card = renderShareCard(current.board, { day, stars, streak: daily.streak });
+  void shareCard(card, text, () => ui.toast("✓"));
 }
 
 function fail(): void {
@@ -324,7 +327,15 @@ function useHint(): void {
     lastTapAt = performance.now();
     return;
   }
+  // Rewarded ad: freeze input, timers and audio while it plays, restore after either outcome.
+  scene.setLocked(true);
+  lifecycle.setGamePaused(true);
+  clearTimeout(cueTimer);
+  clearTimeout(demoIdleTimer);
   void hints.adSlot("hint").then((ok) => {
+    lifecycle.setGamePaused(false);
+    scene.setLocked(false);
+    lastTapAt = performance.now();
     if (ok) { ui.setHints(hints.count); useHint(); } else ui.shakeHint();
   });
 }
@@ -335,6 +346,11 @@ function pause(): void {
   paused = true;
   scene.setLocked(true);
   lifecycle.setGamePaused(true);
+  // Nothing counts down behind the menu: tutorial cue, pass-through demo and idle hint all stop.
+  clearTimeout(cueTimer);
+  clearTimeout(demoIdleTimer);
+  clearTimeout(demoTimer);
+  void progress.flush();
   ui.setToggles(progress.data.settings.muted, progress.data.settings.colorAssist);
   ui.showPause();
 }
@@ -348,6 +364,8 @@ function resume(): void {
   ui.setHudVisible(true);
   scene.setLocked(false);
   lastTapAt = performance.now();
+  scheduleTutorialCue();
+  armPassIdle();
 }
 
 function openMap(focusChapter?: number): void {
@@ -377,17 +395,23 @@ async function boot(): Promise<void> {
   await platform.init();
   await progress.load();
   const s = progress.data.settings;
-  audio.setMuted(s.muted);
+  // Muted if either the host (YouTube's player) or the player's own setting says so.
+  // The in-game toggle only ever changes the player's preference, never overrides the host.
+  let hostMuted = false;
+  const applyMute = () => audio.setMuted(hostMuted || s.muted);
+  applyMute();
   lifecycle.installVisibility();
-  platform.onPause(() => lifecycle.setGamePaused(true));
+  // Host pause (YouTube backgrounding, tab hidden): open our pause menu so the board, timers
+  // and audio all stop; the player resumes deliberately.
+  platform.onPause(() => { if (current && !ended) pause(); else lifecycle.setGamePaused(true); void progress.flush(); });
   platform.onResume(() => { if (!paused) lifecycle.setGamePaused(false); });
-  platform.onAudioToggle((enabled) => audio.setMuted(!enabled || progress.data.settings.muted));
+  platform.onAudioToggle((enabled) => { hostMuted = !enabled; applyMute(); });
 
   ui = new UI(document.getElementById("ui")!, {
     pause, resume, hint: useHint, next,
     replay: () => { audio.ui(); start(current.def.kind === "campaign" ? fetchLevel("campaign", current.def.index) : current); },
     retry: () => { audio.ui(); if (current.def.kind === "endless") startRun(true); else restartSame(); },
-    toggleSound: () => { s.muted = !s.muted; audio.setMuted(s.muted); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
+    toggleSound: () => { s.muted = !s.muted; applyMute(); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
     toggleAssist: () => { s.colorAssist = !s.colorAssist; scene.setColorAssist(s.colorAssist); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
     openMap: () => openMap(),
     playLevel: (lvl) => { lifecycle.setGamePaused(false); startIndex(lvl); },
@@ -406,7 +430,7 @@ async function boot(): Promise<void> {
     render: { antialias: true, powerPreference: "high-performance" },
     fps: { target: 60 },
     banner: false,
-    callbacks: { preBoot: (g) => { g.registry.set("dpr", dpr); g.registry.set("lowfx", params.has("lowfx")); g.registry.set("nobake", params.has("nobake")); } },
+    callbacks: { preBoot: (g) => { g.registry.set("dpr", dpr); g.registry.set("lowfx", params.has("lowfx") || lowTier()); g.registry.set("nobake", params.has("nobake")); } },
     scene: [],
   });
   const resize = () => {
@@ -420,7 +444,7 @@ async function boot(): Promise<void> {
     scene.hooks = {
       onPress: () => audio.touch(),
       onTap,
-      onPassThrough: () => audio.passThrough(),
+      onPassThrough: (k) => { audio.passThrough(k); haptics.pulse("clear"); },
       onReady: () => resolve(),
     };
     game.scene.add("board", scene, true);
@@ -434,7 +458,8 @@ async function boot(): Promise<void> {
   const first = startAt ? Math.max(1, Math.min(Number(startAt) || 1, 999)) : Math.max(1, Math.min(progress.data.current, progress.data.unlocked));
   if (params.has("daily")) start(fetchLevel("daily", 0));
   else startIndex(first);
-  platform.gameReady();
+  // Report the first frame only once the board has actually been drawn (two rAFs = rendered).
+  requestAnimationFrame(() => requestAnimationFrame(() => { platform.firstFrame(); platform.gameReady(); }));
 
   // Idle → hint button pulses.
   idleTimer = window.setInterval(() => {
@@ -445,13 +470,15 @@ async function boot(): Promise<void> {
     if (e.key === "Escape" || e.key === "p") { if (paused) resume(); else pause(); }
     else if (e.key === "h") useHint();
   });
-  window.addEventListener("pagehide", () => { if (!ended) telemetry.emit("quit", { remaining: session.state.remaining }); });
+  window.addEventListener("pagehide", () => { if (!ended) telemetry.emit("quit", { remaining: session.state.remaining }); void progress.flush(); });
 
   // Automation / QA hooks.
   (window as unknown as { __chroma: unknown }).__chroma = {
     level: () => current.def,
     remaining: () => session.state.remaining,
     lives: () => session.lives,
+    passFree: () => session.state.freeLines().filter((i) => session.state.passThrough(i).length > 0),
+    muted: () => audio.isMuted,
     free: () => session.state.freeLines(),
     blocked: () => session.state.alive.map((a, i) => (a && session.state.firstBlocker(i) >= 0 ? i : -1)).filter((i) => i >= 0),
     solution: () => solve(session.state).order,
@@ -462,8 +489,16 @@ async function boot(): Promise<void> {
     // Store-art / trailer capture: freeze the real loop and advance in fixed steps.
     freeze: () => { game.loop.sleep(); capT = performance.now(); },
     advance: (ms: number, fps = 30) => { for (let t = 0; t < ms; t += 1000 / fps) { capT += 1000 / fps; game.step(capT, 1000 / fps); } },
+    shareCard: () => renderShareCard(current.board, { day: daily.key.replace("daily:", ""), stars: 3, streak: 5 }).toDataURL("image/png"),
     hud: (on: boolean) => { ui.setHudVisible(on); document.body.classList.toggle("capture", !on); },
   };
+}
+
+/** Budget-device guess before the first frame: start without the blur pass instead of
+ * discovering slow frames 2–4 s in. deviceMemory is Chromium-only (Android); iOS keeps full FX. */
+function lowTier(): boolean {
+  const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return mem !== undefined && mem <= 4;
 }
 
 function insets() {

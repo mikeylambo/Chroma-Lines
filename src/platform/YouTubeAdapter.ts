@@ -6,7 +6,7 @@ import { WebAdapter } from "./WebAdapter.ts";
 interface YtGame {
   IN_PLAYABLES_ENV?: boolean;
   game: { firstFrameReady(): void; gameReady(): void; saveData(d: string): Promise<void>; loadData(): Promise<string> };
-  system: { onPause(cb: () => void): void; onResume(cb: () => void): void; isAudioEnabled(): boolean; onAudioEnabledChange(cb: (on: boolean) => void): void };
+  system: { getLanguage?(): Promise<string>; onPause(cb: () => void): void; onResume(cb: () => void): void; isAudioEnabled(): boolean; onAudioEnabledChange(cb: (on: boolean) => void): void };
   engagement: { sendScore(s: { value: number }): Promise<void> };
   ads?: { requestRewardedAd(id: string): Promise<boolean> };
   health?: { logError(): void; logWarning(): void };
@@ -23,11 +23,16 @@ export class YouTubeAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     const api = yt();
     if (!api) return this.fallback.init();
-    api.game.firstFrameReady();
+    try { this.lang = (await api.system.getLanguage?.()) ?? this.lang; } catch { /* keep default */ }
     window.addEventListener("error", () => api.health?.logError());
     window.addEventListener("unhandledrejection", () => api.health?.logError());
   }
+  private lang = navigator.language || "en";
+  private framed = false;
+  /** Called once the board has actually rendered — not at script start. */
+  firstFrame(): void { if (!this.framed) { this.framed = true; yt()?.game.firstFrameReady(); } }
   gameReady(): void { yt()?.game.gameReady(); }
+  language(): string { return this.lang; }
   onPause(cb: () => void): void { const api = yt(); if (api) api.system.onPause(cb); else this.fallback.onPause(cb); }
   onResume(cb: () => void): void { const api = yt(); if (api) api.system.onResume(cb); else this.fallback.onResume(cb); }
   onAudioToggle(cb: (enabled: boolean) => void): void {

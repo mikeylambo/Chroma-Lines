@@ -134,3 +134,10 @@ button:focus-visible { box-shadow: 0 0 0 3px #fff8; }
 .overlay.ov-fail.show:has(.runover) { background: #02040bcc; }
 .toast { position: absolute; left: 50%; bottom: 30%; transform: translateX(-50%); padding: 8px 16px; border-radius: 20px; background: #0d1430; color: #7dffb0; font-weight: 800; animation: land .3s both; pointer-events: none !important; }
 .capture #ui { display: none; }
+
+.chapter h3 { justify-content: flex-start; gap: 12px; }
+.chapter h3 em { margin-left: auto; }
+.cnum { font-size: 22px; font-weight: 800; color: #e8fbff; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.cglyph { display: flex; gap: 5px; align-items: center; }
+.cdot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.cshape { width: 12px; height: 12px; margin-left: 3px; border: 2px solid #cfe9ff; border-radius: 3px; transform: rotate(45deg); opacity: .8; }

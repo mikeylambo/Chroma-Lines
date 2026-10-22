@@ -62,7 +62,18 @@ export class Progress {
     try { this.data = normalizeSave(await this.platform.load<SaveData>()); } catch { this.data = structuredClone(DEFAULT_SAVE); }
   }
 
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Coalesced save: bursts of changes become one write (hosts rate-limit saveData). */
   save(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => void this.flush(), 800);
+    return this.saving;
+  }
+
+  /** Write now (pause, tab hide, page exit). */
+  flush(): Promise<void> {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     const snapshot = structuredClone(this.data);
     this.saving = this.saving.then(() => this.platform.save(snapshot)).catch(() => undefined);
     return this.saving;

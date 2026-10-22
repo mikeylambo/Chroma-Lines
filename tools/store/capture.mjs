@@ -104,29 +104,33 @@ async function trailer() {
   mkdirSync(FR, { recursive: true });
   let f = 0;
   const grab = async (p, n = 1) => { for (let i = 0; i < n; i++) { await p.evaluate(() => window.__chroma.advance(1000 / 30)); await p.screenshot({ path: path.join(FR, `${String(f++).padStart(5, "0")}.jpg`), type: "jpeg", quality: 92 }); } };
+  // Taps pass-through lines first so the game's twist is on screen as much as possible.
   const playBoard = async (p, gap, maxTaps = 99) => {
     for (let i = 0; i < maxTaps && (await p.evaluate(() => window.__chroma.remaining())) > 0; i++) {
-      const s = await p.evaluate(() => window.__chroma.solution());
-      await p.evaluate((x) => window.__chroma.tap(x), s[0]);
-      await grab(p, gap);
+      const pass = await p.evaluate(() => window.__chroma.passFree());
+      const pick = pass.length ? pass[0] : (await p.evaluate(() => window.__chroma.solution()))[0];
+      await p.evaluate((x) => window.__chroma.tap(x), pick);
+      await grab(p, pass.length ? gap + 6 : gap); // linger on pass-throughs
     }
   };
+  // Cold open on the twist: a jammed board, then same colours sliding through each other
+  // within the first half-second. The logo lands only after that board clears.
   const segments = [
-    { q: "?level=11", intro: true, gap: 12 },
-    { q: "?level=33", gap: 6 },
-    { q: "?level=54", gap: 7 },
-    { q: "?level=58", gap: 5, outro: true },
+    { q: "?level=4", gap: 10, lead: 12, logoAfter: true },
+    { q: "?level=33", gap: 6, lead: 10 },
+    { q: "?level=54", gap: 7, lead: 10 },
+    { q: "?level=58", gap: 5, lead: 10, outro: true },
   ];
   for (const seg of segments) {
     const { p, ctx } = await page(540, 960, seg.q);
-    await p.evaluate(() => window.__chroma.freeze());
-    if (seg.intro) {
-      await logo(p, "left:0;right:0;top:110px;text-align:center;transition:opacity .4s", 92);
-      await grab(p, 45);
-      await p.evaluate(() => { document.querySelector(".sl-logo").style.opacity = "0"; });
-    } else await grab(p, 14);
+    await p.evaluate(() => { window.__chroma.freeze(); window.__chroma.advance(900); }); // arrival done before frame 0
+    await grab(p, seg.lead);
     await playBoard(p, seg.gap);
-    await grab(p, seg.outro ? 20 : 30);
+    await grab(p, 16);
+    if (seg.logoAfter) {
+      await logo(p, "left:0;right:0;top:36%;text-align:center", 96);
+      await grab(p, 40);
+    }
     if (seg.outro) { await logo(p, "left:0;right:0;top:38%;text-align:center", 104); await grab(p, 60); }
     await ctx.close();
     console.log("segment", seg.q, "frames", f);

@@ -1,8 +1,12 @@
 export interface PlatformAdapter {
   readonly id: "web" | "youtube";
   init(): Promise<void>;
+  /** The first real frame (the board) is on screen. */
+  firstFrame(): void;
   /** First frame interactive. */
   gameReady(): void;
+  /** Host UI language (BCP-47), e.g. "en", "pt-BR". */
+  language(): string;
   onPause(cb: () => void): void;
   onResume(cb: () => void): void;
   onAudioToggle(cb: (enabled: boolean) => void): void;

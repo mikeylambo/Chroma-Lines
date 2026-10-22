@@ -112,10 +112,11 @@ export function dailyLevel(date = new Date()): LoadedLevel {
   return { def: { kind: "daily", index: 0, chapter: 0, seed: r.seed, band, breather: false, mask, key: sched.key }, board: r.board, score: r.score };
 }
 
-/** Points for clearing an endless board: lines × depth of run, perfect boards ×1.5. */
-export function endlessPoints(board: Board, n: number, mistakes: number): number {
-  const base = board.lines.length * 10 * (1 + (n - 1) * 0.08);
-  return Math.round(base * (mistakes === 0 ? 1.5 : 1));
+/** Points for an endless board: lines × run depth, perfect ×1.5, plus a bonus per pass-through clear. */
+export function endlessPoints(board: Board, n: number, mistakes: number, passes = 0): number {
+  const depth = 1 + (n - 1) * 0.08;
+  const base = board.lines.length * 10 * depth;
+  return Math.round(base * (mistakes === 0 ? 1.5 : 1) + passes * 25 * depth);
 }
 
 export function loadLevel(kind: LevelKind, index: number): LoadedLevel {

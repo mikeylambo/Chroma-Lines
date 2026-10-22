@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LEVEL_SPECS } from "../src/content/curveSpec.ts";
+import { AHA_LEVEL, LEVEL_SPECS } from "../src/content/curveSpec.ts";
 import { campaignLevel, dailyLevel, endlessBoard, endlessPoints } from "../src/meta/levels.ts";
 import { solve } from "../src/sim/solve.ts";
 import { serializeBoard } from "../src/sim/board.ts";
@@ -16,11 +16,12 @@ test("curve: every campaign level sits inside its band and is solvable", () => {
   }
 });
 
-test("curve: non-decreasing, except breathers (and the L11 aha intro)", () => {
+test("curve: non-decreasing, except breathers (and the aha intro)", () => {
   let prev = -Infinity;
   for (const spec of LEVEL_SPECS) {
     const { def } = campaignLevel(spec.level);
-    if (spec.breather || spec.aha) {
+    if (spec.aha) continue; // teaching board, deliberately outside the curve
+    if (spec.breather) {
       assert.ok(def.band[0] <= prev, `breather L${spec.level} should be easier`);
       continue;
     }
@@ -29,8 +30,8 @@ test("curve: non-decreasing, except breathers (and the L11 aha intro)", () => {
   }
 });
 
-test("curve: L11 reads as jammed in mono but has a colour pass-through", () => {
-  const { score } = campaignLevel(11);
+test("curve: the aha level reads as jammed in mono but has a colour pass-through", () => {
+  const { score } = campaignLevel(AHA_LEVEL);
   assert.equal(score.monoFree, 0);
   assert.ok(score.free >= 1 && score.chromaTraps >= 1);
 });
@@ -85,4 +86,15 @@ test("endless: difficulty climbs (breathers aside) and perfect boards score more
 
 test("daily: weekday profiles all generate solvable boards", () => {
   for (let d = 0; d < 14; d++) assert.ok(solve(dailyLevel(new Date(Date.UTC(2026, 9, 18 + d))).board).solved);
+});
+
+test("colour arrives right after the three mono tutorials", () => {
+  assert.equal(AHA_LEVEL, 4);
+  for (const l of [1, 2, 3]) assert.equal(campaignLevel(l).board.rule, "mono");
+  for (let l = 4; l <= 10; l++) assert.equal(campaignLevel(l).board.rule, "chroma");
+});
+
+test("endless: pass-through clears earn a bonus", () => {
+  const b = endlessBoard(9, 3).board;
+  assert.ok(endlessPoints(b, 3, 0, 2) > endlessPoints(b, 3, 0, 0));
 });
