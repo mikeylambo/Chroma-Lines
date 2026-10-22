@@ -188,10 +188,22 @@ export class SynthAudio implements AudioSystem {
     this.note(this.scale(combo + 5), t, 0.55, 0.22);
   }
 
-  passThrough(): void {
+  /** Glass-bell chime for light passing through light; k-th pass in one slide climbs. */
+  passThrough(k = 0): void {
     if (!this.ctx || this.muted) return;
-    const t = this.ctx.currentTime;
-    this.note(this.scale(12), t, 0.25, 0.06, "sine", 0.8);
+    const ctx = this.ctx, t = ctx.currentTime;
+    const f0 = mtof(this.scale(10 + k * 2));
+    // Inharmonic bell partials give the "struck glass" colour.
+    [[1, 0.11, 1.6], [2.76, 0.05, 0.9], [5.4, 0.025, 0.5], [2, 0.04, 1.2]].forEach(([ratio, vol, dur]) => {
+      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = f0 * ratio!;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol!, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur!);
+      o.connect(g); g.connect(this.sfx);
+      const w = ctx.createGain(); w.gain.value = 0.9; g.connect(w).connect(this.verb);
+      o.start(t); o.stop(t + dur! + 0.05);
+    });
   }
 
   touch(): void {

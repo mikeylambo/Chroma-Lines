@@ -45,6 +45,7 @@ let cueTimer = 0;
 let demoTimer = 0;
 let levelStartAt = 0;
 let capT = 0;
+let boardPasses = 0; // lines cleared this board by passing through their own colour
 const cache = new Map<string, LoadedLevel>();
 
 function keyOf(kind: LevelKind, index: number): string { return kind === "daily" ? `daily:${daily.key}` : `${kind}:${index}`; }
@@ -81,6 +82,7 @@ function start(level: LoadedLevel): void {
   ended = false;
   paused = false;
   lastTapAt = levelStartAt = performance.now();
+  boardPasses = 0;
   clearTimeout(cueTimer);
   clearTimeout(demoTimer);
   ui.close();
@@ -215,6 +217,7 @@ function onTap(line: number): void {
     combo = now - lastClearAt <= COMBO_WINDOW ? combo + 1 : 0;
     lastClearAt = now;
     scene.exit(line, r.passThrough);
+    if (r.passThrough.length) boardPasses++;
     if (r.passThrough.length && progress.data.seen.passClears < PASS_LEARNED) progress.data.seen.passClears++;
     armPassIdle();
     audio.clear(combo);
@@ -255,7 +258,7 @@ function win(): void {
     telemetry.emit("daily_complete", { stars, streak: daily.streak });
   } else if (def.kind === "endless") {
     const e = progress.data.endless, run = e.run!;
-    const points = endlessPoints(current.board, def.index, session.mistakes);
+    const points = endlessPoints(current.board, def.index, session.mistakes, boardPasses);
     run.score += points;
     run.n = def.index + 1;
     run.lives = session.lives;
@@ -441,7 +444,7 @@ async function boot(): Promise<void> {
     scene.hooks = {
       onPress: () => audio.touch(),
       onTap,
-      onPassThrough: () => audio.passThrough(),
+      onPassThrough: (k) => { audio.passThrough(k); haptics.pulse("clear"); },
       onReady: () => resolve(),
     };
     game.scene.add("board", scene, true);
@@ -474,6 +477,7 @@ async function boot(): Promise<void> {
     level: () => current.def,
     remaining: () => session.state.remaining,
     lives: () => session.lives,
+    passFree: () => session.state.freeLines().filter((i) => session.state.passThrough(i).length > 0),
     muted: () => audio.isMuted,
     free: () => session.state.freeLines(),
     blocked: () => session.state.alive.map((a, i) => (a && session.state.firstBlocker(i) >= 0 ? i : -1)).filter((i) => i >= 0),

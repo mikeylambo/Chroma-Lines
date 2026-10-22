@@ -93,3 +93,8 @@ test("colour arrives right after the three mono tutorials", () => {
   for (const l of [1, 2, 3]) assert.equal(campaignLevel(l).board.rule, "mono");
   for (let l = 4; l <= 10; l++) assert.equal(campaignLevel(l).board.rule, "chroma");
 });
+
+test("endless: pass-through clears earn a bonus", () => {
+  const b = endlessBoard(9, 3).board;
+  assert.ok(endlessPoints(b, 3, 0, 2) > endlessPoints(b, 3, 0, 0));
+});

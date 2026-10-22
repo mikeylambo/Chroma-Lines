@@ -14,6 +14,7 @@ const STROKE = 0.24; // of cell — thin enough that heads never overlap neighbo
 const BUMP_TRAUMA = 0.25;
 const MAX_CELL_PX = 76;
 const SIGHT_DELAY_MS = 120;
+const RESONATE_S = 0.5;
 
 export interface Insets { top: number; bottom: number; side: number }
 
@@ -46,6 +47,7 @@ interface LineView {
   /** Live views draw every frame; idle ones are baked into shared render textures. */
   live: boolean;
   ghost: boolean;
+  resonate: number; // s remaining: passed-through lines ring like a struck string
   appear: number; // arrival fade 0..1
   appearDelay: number; // s
 }
@@ -53,7 +55,8 @@ interface LineView {
 export interface SceneHooks {
   onPress(line: number): void;
   onTap(line: number): void;
-  onPassThrough(): void;
+  /** k = how many same-colour lines this slide has passed so far (0-based). */
+  onPassThrough(k: number): void;
   onReady(): void;
 }
 
@@ -340,7 +343,7 @@ export class BoardScene extends Phaser.Scene {
     const glow = this.add.graphics();
     this.glowLayer.add(glow);
     const core = this.add.graphics().setDepth(ghost ? 9 : 3);
-    return { index, line, style, glow, core, pressed: false, flare: 0, hurt: 0, nudge: -1, exit: null, gone: false, dirty: true, live: true, ghost, appear: 1, appearDelay: 0 };
+    return { index, line, style, glow, core, pressed: false, flare: 0, hurt: 0, nudge: -1, exit: null, gone: false, dirty: true, live: true, ghost, resonate: 0, appear: 1, appearDelay: 0 };
   }
 
   private makeExit(line: Line, passThrough: number[], ghost: boolean): ExitAnim {
@@ -473,7 +476,7 @@ export class BoardScene extends Phaser.Scene {
       if (v.appearDelay <= 0) v.appear = Math.min(1, v.appear + dt / 0.26);
       animating = true;
     }
-    const live = this.noBake || v.appear < 1 || v.pressed || v.flare > 0 || v.hurt > 0 || v.nudge >= 0 || !!v.exit || this.hint?.line === v.index;
+    const live = this.noBake || v.appear < 1 || v.pressed || v.flare > 0 || v.resonate > 0 || v.hurt > 0 || v.nudge >= 0 || !!v.exit || this.hint?.line === v.index;
     if (live !== v.live) {
       v.live = live;
       v.glow.setVisible(live);
@@ -485,7 +488,8 @@ export class BoardScene extends Phaser.Scene {
       if (v.dirty) { v.dirty = false; this.staticDirty = true; }
       return;
     }
-    if (v.flare > 0) { v.flare = Math.max(0, v.flare - dt * 3.2); animating = true; }
+    if (v.flare > 0) { v.flare = Math.max(0, v.flare - dt * (v.resonate > 0 ? 1.6 : 3.2)); animating = true; }
+    if (v.resonate > 0) { v.resonate = Math.max(0, v.resonate - dt); animating = true; }
     if (v.hurt > 0) { v.hurt = Math.max(0, v.hurt - dt * 1000); animating = true; }
     if (v.nudge >= 0) { v.nudge += dt * 1000; if (v.nudge > BUMP_MS) v.nudge = -1; animating = true; }
     if (v.exit) { this.stepExit(v, dt, time); animating = true; }
@@ -503,17 +507,21 @@ export class BoardScene extends Phaser.Scene {
     while (e.trail.length && time - e.trail[0]!.t > TRAIL_MS) e.trail.shift();
     this.drawTrail(e, v.style, time);
 
+    let k = 0;
     for (const f of e.flares) {
-      if (!f.done && headT >= f.at) {
+      if (f.done) { k++; continue; }
+      if (headT >= f.at) {
         f.done = true;
+        // Signature moment: light passing through light. The passed line rings, a ripple
+        // bursts from the crossing, and (in sound) a bell chime climbs with each pass.
         const other = this.views[f.line];
-        if (other && !other.exit) { other.flare = 1; other.dirty = true; }
+        if (other && !other.exit) { other.flare = 1; other.resonate = RESONATE_S; other.dirty = true; }
         v.flare = 1;
         const fp = pointAt(e.path, f.at);
         const p = this.toPx(fp.x, fp.y);
-        this.sparks.setParticleTint(v.style.line);
-        this.sparks.emitParticleAt(p.x, p.y, e.ghost ? 5 : 9);
-        this.hooks.onPassThrough();
+        this.passBurst(p.x, p.y, v.style.line, e.ghost);
+        if (!e.ghost) this.hooks.onPassThrough(k);
+        k++;
       }
     }
     if (!e.flashed && headT >= e.edgeT) {
@@ -566,7 +574,13 @@ export class BoardScene extends Phaser.Scene {
       const k = v.nudge / BUMP_MS;
       off = k < 0.3 ? BUMP_DIST * easeOut(k / 0.3) : BUMP_DIST * spring((k - 0.3) / 0.7);
     }
-    const ox = DX[v.line.dir] * off, oy = DY[v.line.dir] * off;
+    let ox = DX[v.line.dir] * off, oy = DY[v.line.dir] * off;
+    if (v.resonate > 0) {
+      // Struck-string shimmer: a fast, decaying vibration.
+      const amp = 0.07 * (v.resonate / RESONATE_S);
+      ox += Math.sin(time / 11) * amp;
+      oy += Math.cos(time / 13) * amp;
+    }
     const px = pts.map((p) => this.toPx(p.x + ox, p.y + oy));
 
     let color = v.style.line;
@@ -736,6 +750,20 @@ export class BoardScene extends Phaser.Scene {
       const p = this.toPx(hx + DX[v.line.dir] * k, hy + DY[v.line.dir] * k);
       this.fx.fillCircle(p.x, p.y, this.cs * 0.05);
     }
+  }
+
+  private passRings: Phaser.GameObjects.Image[] = [];
+  private passBurst(x: number, y: number, color: number, ghost: boolean): void {
+    // Two staggered ripples: a tight bright one and a wide soft one.
+    for (const [to, dur, delay, alpha] of [[1.6, 420, 0, 1], [2.8, 640, 70, 0.6]] as const) {
+      let ring = this.passRings.find((r) => !r.visible);
+      if (!ring) { ring = this.add.image(0, 0, "ring-thin").setBlendMode(Phaser.BlendModes.ADD).setDepth(18); this.passRings.push(ring); }
+      const r = ring;
+      r.setVisible(true).setPosition(x, y).setTint(mix(color, 0xffffff, 0.45)).setScale((this.cs * 0.3) / 64).setAlpha((ghost ? 0.5 : 1) * alpha);
+      this.tweens.add({ targets: r, scale: (this.cs * to) / 64, alpha: 0, duration: dur, delay, ease: "Cubic.easeOut", onComplete: () => r.setVisible(false) });
+    }
+    this.sparks.setParticleTint(mix(color, 0xffffff, 0.3));
+    this.sparks.emitParticleAt(x, y, ghost ? 6 : 18);
   }
 
   private drawSweep(dt: number): void {
