@@ -13,6 +13,7 @@ const TOUCH_BRIGHT = 0.3;
 const STROKE = 0.24; // of cell — thin enough that heads never overlap neighbours
 const BUMP_TRAUMA = 0.25;
 const MAX_CELL_PX = 76;
+const SIGHT_DELAY_MS = 120;
 
 export interface Insets { top: number; bottom: number; side: number }
 
@@ -91,6 +92,8 @@ export class BoardScene extends Phaser.Scene {
   private time0 = 0;
   private pressIndex = -1;
   private pressPt: Pt = { x: 0, y: 0 };
+  private pressAt = 0;
+  private sight = 0; // 0..1 fade of the hold-to-preview path
   private hint: { line: number; t: number; kind: "hint" | "cue" } | null = null;
   private sweep: { t: number } | null = null;
   private rimLevel = 0;
@@ -390,6 +393,8 @@ export class BoardScene extends Phaser.Scene {
     if (this.inputLocked) return;
     const i = this.pick(x, y);
     this.pressIndex = i;
+    this.pressAt = this.time.now;
+    this.sight = 0;
     this.pressPt = { x, y };
     if (i >= 0) {
       const v = this.views[i]!;
@@ -413,6 +418,7 @@ export class BoardScene extends Phaser.Scene {
   private release(): void {
     if (this.pressIndex >= 0) { const v = this.views[this.pressIndex]; if (v) { v.pressed = false; v.dirty = true; } }
     this.pressIndex = -1;
+    this.sight = 0;
   }
 
   // ---------- Frame ----------
@@ -445,6 +451,7 @@ export class BoardScene extends Phaser.Scene {
     });
 
     this.fx.clear();
+    this.drawSight(time, dt);
     this.drawHint(dt);
     if (this.sweep) this.drawSweep(dt);
   }
@@ -701,6 +708,34 @@ export class BoardScene extends Phaser.Scene {
       this.hintRings[k]!.setVisible(true).setPosition(p.x, p.y).setTint(col).setScale(r / 64).setAlpha(peak * (1 - ph));
     }
     this.hintRings[2]!.setVisible(true).setPosition(p.x, p.y).setTint(col).setScale((this.cs * 0.56) / 64).setAlpha(peak * (0.55 + 0.3 * Math.sin(h.t * 6)));
+  }
+
+  /**
+   * Hold-to-preview: after a short hold, a faint neutral beam traces where the line would travel.
+   * It never says whether the path is clear — reading colours stays the player's job.
+   */
+  private drawSight(time: number, dt: number): void {
+    const i = this.pressIndex;
+    const v = i >= 0 ? this.views[i] : undefined;
+    if (!v || v.exit || v.gone || time - this.pressAt < SIGHT_DELAY_MS) return;
+    this.sight = Math.min(1, this.sight + dt * 6);
+    const b = this.board!;
+    const head = v.line.cells[0]!;
+    const hx = (head % b.w) + 0.5, hy = ((head / b.w) | 0) + 0.5;
+    const n = rayCells(b, v.line).length;
+    const from = this.toPx(hx + DX[v.line.dir] * 0.5, hy + DY[v.line.dir] * 0.5);
+    const to = this.toPx(hx + DX[v.line.dir] * (n + 0.9), hy + DY[v.line.dir] * (n + 0.9));
+    const a = this.sight;
+    this.fx.lineStyle(this.cs * 0.34, 0xffffff, 0.05 * a);
+    this.fx.lineBetween(from.x, from.y, to.x, to.y);
+    this.fx.lineStyle(Math.max(1.5, this.cs * 0.035), 0xffffff, 0.4 * a);
+    this.fx.lineBetween(from.x, from.y, to.x, to.y);
+    // Cell ticks so counting rows is effortless; a soft chevron at the exit.
+    this.fx.fillStyle(0xffffff, 0.45 * a);
+    for (let k = 1; k <= n; k++) {
+      const p = this.toPx(hx + DX[v.line.dir] * k, hy + DY[v.line.dir] * k);
+      this.fx.fillCircle(p.x, p.y, this.cs * 0.05);
+    }
   }
 
   private drawSweep(dt: number): void {

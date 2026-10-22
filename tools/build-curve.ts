@@ -27,7 +27,10 @@ for (const spec of LEVEL_SPECS) {
   samples.sort((a, b) => a - b);
   const q = samples[Math.floor((0.3 + 0.45 * spec.ramp) * (samples.length - 1))]!;
   let band: [number, number];
-  if (spec.breather || spec.aha) {
+  if (spec.aha) {
+    // Teaching board: exempt from the curve; any jammed-looking board in a broad easy band.
+    band = [+Math.max(prevLo, samples[0]!).toFixed(2), +(samples[Math.floor(samples.length * 0.6)]! + 1).toFixed(2)];
+  } else if (spec.breather) {
     const lo = Math.max(0, Math.min(prevLo - WIDTH, samples[Math.floor(samples.length * 0.2)]!));
     band = [+lo.toFixed(2), +(prevLo + (spec.aha ? WIDTH : 0.2)).toFixed(2)];
   } else {

@@ -64,7 +64,7 @@ try {
   check("L2 = 2 stars after one mistake", (await page.evaluate(() => window.__chroma.save().stars[2])) === 2);
 
   // Jump to L11 (aha) and L24 (silhouette), L58, endless, screenshot mid-play.
-  for (const [lvl, name] of [[11, "04-L11-aha"], [24, "05-L24-bolt"], [47, "06-L47"], [58, "07-L58"], [61, "08-endless"]]) {
+  for (const [lvl, name] of [[4, "04-L4-aha"], [11, "04b-L11"], [24, "05-L24-bolt"], [47, "06-L47"], [58, "07-L58"], [61, "08-endless"]]) {
     await page.goto(`${url}?level=${lvl}`);
     await page.waitForFunction(() => window.__chroma && window.__chroma.level(), null, { timeout: 15000 });
     await page.waitForTimeout(lvl === 11 ? 1500 : 900);

@@ -39,7 +39,8 @@ export class SynthAudio implements AudioSystem {
     this.sfx = ctx.createGain(); this.sfx.gain.value = 0.8; this.sfx.connect(this.master);
     this.music = ctx.createGain(); this.music.gain.value = 0.55; this.music.connect(this.master);
     this.verb = ctx.createConvolver();
-    this.verb.buffer = this.impulse(2.4);
+    // Reverb tail is built after the unlock gesture returns, so the first tap never waits on it.
+    setTimeout(() => { this.verb.buffer = this.impulse(1.8); }, 0);
     const wet = ctx.createGain(); wet.gain.value = 0.32;
     this.verb.connect(wet).connect(this.master);
     this.startPad();
@@ -49,9 +50,17 @@ export class SynthAudio implements AudioSystem {
     const ctx = this.ctx!;
     const len = Math.floor(ctx.sampleRate * seconds);
     const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+    // Exponential decay by running multiply (no per-sample pow) and a cheap LCG for noise.
+    const k = Math.pow(0.001, 1 / len);
+    let seed = 0x2545f491;
     for (let ch = 0; ch < 2; ch++) {
       const d = buf.getChannelData(ch);
-      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+      let env = 1;
+      for (let i = 0; i < len; i++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) | 0;
+        d[i] = (seed / 2147483648) * env;
+        env *= k;
+      }
     }
     return buf;
   }

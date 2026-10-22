@@ -19,6 +19,11 @@ const I = {
   infinity: `<svg viewBox="0 0 24 24"><path d="M7 8.5a3.5 3.5 0 1 0 0 7c3 0 7-7 10-7a3.5 3.5 0 1 1 0 7c-3 0-7-7-10-7z" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
 };
 
+const CHAPTER_GLYPHS: Record<number, { colors: number; shape: boolean }> = {
+  1: { colors: 2, shape: false }, 2: { colors: 2, shape: false }, 3: { colors: 2, shape: true },
+  4: { colors: 3, shape: false }, 5: { colors: 3, shape: false }, 6: { colors: 3, shape: true },
+};
+
 export interface UIHandlers {
   pause(): void;
   resume(): void;
@@ -231,7 +236,12 @@ export class UI {
       const sec = h("section", `chapter c${ch.id}`);
       const first = (ch.id - 1) * 10 + 1;
       const got = Array.from({ length: 10 }, (_, i) => m.stars[first + i] ?? 0).reduce((a, b) => a + b, 0);
-      sec.append(h("h3", "", `<span>${ch.name}</span><em>${I.star}${got}/30</em>`));
+      // Wordless header (no localisation needed): chapter number, its colours, silhouette mark.
+      const glyph = CHAPTER_GLYPHS[ch.id] ?? { colors: 1, shape: false };
+      const dots = ["#3ee8ff", "#ff4fae", "#ffd04a"].slice(0, glyph.colors).map((c) => `<i class="cdot" style="--c:${c}"></i>`).join("");
+      const head = h("h3", "", `<span class="cnum">${ch.id}</span><span class="cglyph">${dots}${glyph.shape ? `<i class="cshape"></i>` : ""}</span><em>${I.star}${got}/30</em>`);
+      head.setAttribute("aria-label", ch.name);
+      sec.append(head);
       const path = h("div", "path");
       for (let i = 0; i < 10; i++) {
         const lvl = first + i;
