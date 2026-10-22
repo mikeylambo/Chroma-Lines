@@ -609,14 +609,15 @@ export class BoardScene extends Phaser.Scene {
     // Inner highlight.
     c.lineStyle(w * 0.3, mix(color, 0xffffff, 0.6), 0.55 * ga); stroke(c, px);
 
-    // Colour-blind stroke pattern (subtle by default, strong with assist).
+    // Colour assist only: per-colour stroke patterns. By default colour alone carries the rule,
+    // so reading the board is part of the puzzle.
     const strong = this.colorAssist;
     const dark = 0x060914;
-    if (v.style.pattern === "dots") {
-      c.fillStyle(dark, (strong ? 0.85 : 0.45) * ga);
-      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * (strong ? 0.36 : 0.26));
-    } else if (v.style.pattern === "stripe") {
-      c.lineStyle(w * (strong ? 0.4 : 0.28), dark, (strong ? 0.8 : 0.5) * ga);
+    if (strong && v.style.pattern === "dots") {
+      c.fillStyle(dark, 0.85 * ga);
+      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * 0.36);
+    } else if (strong && v.style.pattern === "stripe") {
+      c.lineStyle(w * 0.4, dark, 0.8 * ga);
       stroke(c, px.slice(0, Math.max(2, px.length)), true);
     }
 
@@ -624,12 +625,12 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private drawHead(c: Phaser.GameObjects.Graphics, p: Pt, dir: number, style: LineStyle, color: number, a: number, strong: boolean): void {
-    const s = this.cs * (strong ? 1.1 : 1);
+    const s = this.cs; // one head size everywhere
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
     // Classic arrowheads in the line's own colour, starting where the line ends (cell centre)
     // and stopping inside the cell: one continuous arrow, never overlapping a neighbour.
-    // Three silhouettes keep colours distinguishable without relying on hue.
+    // Uniform solid heads by default; with colour assist each colour gets its own silhouette.
     // The bend sits at the cell centre; a short shaft carries the line to the head, whose tip
     // stops just inside the cell edge — so turned heads read as a clean "L into arrow".
     const w = this.cs * STROKE;
@@ -638,13 +639,14 @@ export class BoardScene extends Phaser.Scene {
     c.lineStyle(w, color, a);
     c.lineBetween(mid.x, mid.y, sh.x, sh.y);
     c.fillStyle(color, a);
-    if (style.head === "solid") {
+    const shape = strong ? style.head : "solid";
+    if (shape === "solid") {
       c.fillPoints([at(tip, 0), at(base, 0.28), at(base, -0.28)], true, true);
-    } else if (style.head === "barbed") {
+    } else if (shape === "barbed") {
       c.fillPoints([at(tip, 0), at(base - 0.03, 0.3), at(base + 0.1, 0), at(base - 0.03, -0.3)], true, true);
     } else {
-      // Open chevron: strokes the same weight as the line.
-      const t = at(tip - 0.04, 0), l = at(base + 0.02, 0.26), r = at(base + 0.02, -0.26);
+      // Open chevron: strokes the same weight as the line, spanning the same box as the solid head.
+      const t = at(tip - 0.03, 0), l = at(base - 0.02, 0.3), r = at(base - 0.02, -0.3);
       c.lineBetween(sh.x, sh.y, t.x, t.y);
       c.lineBetween(l.x, l.y, t.x, t.y);
       c.lineBetween(r.x, r.y, t.x, t.y);
