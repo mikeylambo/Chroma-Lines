@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:youtube": "PLATFORM=youtube vite build",
+    "build:youtube": "PLATFORM=youtube vite build && cd dist-youtube && rm -f ../chroma-lines-youtube.zip && zip -qr ../chroma-lines-youtube.zip .",
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test tests/*.test.ts",
     "curve": "node --experimental-strip-types --no-warnings tools/build-curve.ts",

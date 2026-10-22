@@ -15,6 +15,7 @@ const I = {
   star: `<svg viewBox="0 0 24 24"><path d="M12 2.6l2.9 6 6.5.8-4.8 4.5 1.2 6.5L12 17.2l-5.8 3.2 1.2-6.5-4.8-4.5 6.5-.8z"/></svg>`,
   lock: `<svg viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="10" rx="2.2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
   check: `<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  share: `<svg viewBox="0 0 24 24"><circle cx="18" cy="5.5" r="2.8"/><circle cx="6" cy="12" r="2.8"/><circle cx="18" cy="18.5" r="2.8"/><path d="M8.4 10.8l7.2-4.1M8.4 13.2l7.2 4.1" stroke="currentColor" stroke-width="2"/></svg>`,
   infinity: `<svg viewBox="0 0 24 24"><path d="M7 8.5a3.5 3.5 0 1 0 0 7c3 0 7-7 10-7a3.5 3.5 0 1 1 0 7c-3 0-7-7-10-7z" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
 };
 
@@ -38,6 +39,7 @@ export interface MapModel {
   current: number;
   stars: Record<number, number>;
   daily: { streak: number; done: boolean; attempted: boolean };
+  endlessBest: number;
   focusChapter?: number;
 }
 
@@ -90,9 +92,10 @@ export class UI {
 
   // ---- HUD ----
 
-  setLevel(kind: "campaign" | "endless" | "daily", index: number, streak = 0): void {
-    if (kind === "daily") this.levelLabel.innerHTML = `${I.sun}<span>${streak > 0 ? streak : ""}</span>`;
-    else if (kind === "endless") this.levelLabel.innerHTML = `${I.infinity}<span>${index - CAMPAIGN_LENGTH}</span>`;
+  /** extra = daily streak, or endless run score. */
+  setLevel(kind: "campaign" | "endless" | "daily", index: number, extra = 0): void {
+    if (kind === "daily") this.levelLabel.innerHTML = `${I.sun}<span>${extra > 0 ? extra : ""}</span>`;
+    else if (kind === "endless") this.levelLabel.innerHTML = `${I.infinity}<span class="score">${extra.toLocaleString()}</span>`;
     else this.levelLabel.innerHTML = `<span>${index}</span>`;
     this.levelLabel.className = `level ${kind}`;
   }
@@ -120,6 +123,12 @@ export class UI {
     this.combo.classList.remove("pop"); void this.combo.offsetWidth; this.combo.classList.add("pop");
     clearTimeout(this.comboTimer);
     this.comboTimer = window.setTimeout(() => this.combo.classList.remove("pop"), 1200);
+  }
+
+  toast(text: string): void {
+    const t = h("div", "toast", text);
+    this.root.append(t);
+    setTimeout(() => t.remove(), 1400);
   }
 
   setHudVisible(v: boolean): void { this.root.classList.toggle("hud-hidden", !v); }
@@ -161,22 +170,40 @@ export class UI {
   }
 
   /** Stars land one at a time; `onStar(i)` fires as each lands (audio tick). */
-  showResults(stars: number, opts: { hintEarned: boolean; daily?: { streak: number }; onStar: (i: number) => void }): void {
+  showResults(stars: number, opts: { hintEarned: boolean; daily?: { streak: number; share: () => void }; endless?: { points: number; total: number }; onStar: (i: number) => void }): void {
     const card = h("div", "card results");
     const row = h("div", "stars");
     const slots = [0, 1, 2].map(() => { const s = h("i", "star", I.star); row.append(s); return s; });
     card.append(row);
-    if (opts.daily) card.append(h("div", "streak", `${I.sun}<span>${opts.daily.streak}</span>`));
+    if (opts.daily) {
+      const row2 = h("div", "streak", `${I.sun}<span>${opts.daily.streak}</span>`);
+      const d = opts.daily;
+      row2.append(btn("icon share", I.share, "Share", () => d.share()));
+      card.append(row2);
+    }
+    if (opts.endless) card.append(h("div", "points", `<b>+${opts.endless.points.toLocaleString()}</b><span>${I.infinity}${opts.endless.total.toLocaleString()}</span>`));
     if (opts.hintEarned) card.append(h("div", "earned", `${I.bulb}<span>+1</span>`));
     const next = btn("big glow next", I.next, "Next", () => this.on.next());
     const replay = btn("icon small replay", I.replay, "Replay", () => this.on.replay());
-    card.append(next, replay);
+    card.append(next);
+    if (!opts.endless) card.append(replay);
     this.show("results", card);
     slots.forEach((s, i) => {
       if (i >= stars) return;
       setTimeout(() => { s.classList.add("lit"); opts.onStar(i); }, 380 + i * 250);
     });
     setTimeout(() => { card.classList.add("ready"); next.focus({ preventScroll: true }); }, 380 + stars * 250);
+  }
+
+  /** Endless run over: score, best, one big button for a new run. */
+  showRunOver(score: number, best: number, newBest: boolean, boards: number): void {
+    const card = h("div", "card runover");
+    card.append(h("div", `run-score ${newBest ? "best" : ""}`, `${newBest ? I.star : I.infinity}<b>${score.toLocaleString()}</b>`));
+    card.append(h("div", "run-meta", `<span>${I.map}${boards}</span><span>${I.star}${best.toLocaleString()}</span>`));
+    const again = btn("big glow retry", I.replay, "New run", () => this.on.retry());
+    card.append(again);
+    this.show("fail", card);
+    again.focus({ preventScroll: true });
   }
 
   showFail(): void {
@@ -222,7 +249,8 @@ export class UI {
     }
     const endless = h("section", "chapter endless");
     const eLocked = m.unlocked <= CAMPAIGN_LENGTH;
-    endless.append(btn(`node big-node ${eLocked ? "locked" : ""}`, eLocked ? I.lock : I.infinity, "Endless", () => { if (!eLocked) this.on.playLevel(Math.max(CAMPAIGN_LENGTH + 1, m.unlocked)); }));
+    endless.append(btn(`node big-node ${eLocked ? "locked" : ""}`, eLocked ? I.lock : I.infinity, "Endless", () => { if (!eLocked) this.on.playLevel(CAMPAIGN_LENGTH + 1); }));
+    if (!eLocked && m.endlessBest > 0) endless.append(h("div", "ebest", `${I.star}${m.endlessBest.toLocaleString()}`));
     scroller.append(endless);
     wrap.append(scroller);
     this.show("mapview", wrap);

@@ -34,7 +34,7 @@ for (const spec of LEVEL_SPECS) {
     const lo = Math.max(prevLo, q);
     band = [+lo.toFixed(2), +(lo + WIDTH).toFixed(2)];
   }
-  const accept = spec.aha ? (s: ReturnType<typeof scoreBoard>) => s.monoFree === 0 && s.free <= 3 && s.chromaTraps >= 1 : undefined;
+  const accept = spec.aha ? (s: ReturnType<typeof scoreBoard>) => s.monoFree === 0 && s.free <= 4 && s.chromaTraps >= 1 : undefined;
   const r = generateInBand(params, base, band, 6000, accept);
   if (!r.inBand) { failures++; console.error(`L${spec.level} miss: band ${band} got ${r.score.difficulty.toFixed(2)} (q=${q.toFixed(2)})`); }
   if (!spec.breather && !spec.aha) prevLo = band[0];

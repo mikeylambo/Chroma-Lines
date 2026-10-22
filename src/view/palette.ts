@@ -1,6 +1,6 @@
 import palettes from "../content/palettes.json" with { type: "json" };
 
-export type HeadShape = "chevron" | "diamond" | "circle";
+export type HeadShape = "solid" | "barbed" | "open";
 export type Pattern = "solid" | "dots" | "stripe";
 
 export interface LineStyle {
@@ -12,7 +12,7 @@ export interface LineStyle {
 
 const hex = (s: string) => parseInt(s.slice(1), 16);
 
-export const MONO: LineStyle = { line: hex(palettes.mono.line), glow: hex(palettes.mono.glow), head: "chevron", pattern: "solid" };
+export const MONO: LineStyle = { line: hex(palettes.mono.line), glow: hex(palettes.mono.glow), head: "solid", pattern: "solid" };
 export const CHROMA: LineStyle[] = palettes.chroma.map((c) => ({ line: hex(c.line), glow: hex(c.glow), head: c.head as HeadShape, pattern: c.pattern as Pattern }));
 export const BG = {
   top: hex(palettes.background.top),

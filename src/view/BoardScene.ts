@@ -10,7 +10,7 @@ const BUMP_MS = 120;
 const BUMP_DIST = 0.25; // cells
 const HURT_MS = 420; // two red-white pulses
 const TOUCH_BRIGHT = 0.3;
-const STROKE = 0.42; // of cell
+const STROKE = 0.24; // of cell — thin enough that heads never overlap neighbours
 const BUMP_TRAUMA = 0.25;
 const MAX_CELL_PX = 76;
 
@@ -116,6 +116,11 @@ export class BoardScene extends Phaser.Scene {
     grad.addColorStop(0.9, "rgba(255,255,255,1)");
     grad.addColorStop(1, "rgba(255,255,255,0)");
     rc.fillStyle = grad; rc.fillRect(0, 0, 256, 256); ring.refresh();
+    const band = this.textures.createCanvas("band", 8, 128)!;
+    const bc = band.getContext();
+    const bg2 = bc.createLinearGradient(0, 0, 0, 128);
+    bg2.addColorStop(0, "rgba(255,255,255,0)"); bg2.addColorStop(0.5, "rgba(255,255,255,1)"); bg2.addColorStop(1, "rgba(255,255,255,0)");
+    bc.fillStyle = bg2; bc.fillRect(0, 0, 8, 128); band.refresh();
     const thin = this.textures.createCanvas("ring-thin", 128, 128)!;
     const tc = thin.getContext();
     const tg = tc.createRadialGradient(64, 64, 0, 64, 64, 64);
@@ -139,7 +144,7 @@ export class BoardScene extends Phaser.Scene {
     // All line glow strokes live in one additive layer, softened by a single blur pass.
     this.glowLayer = this.add.layer().setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
     if (!this.fxOn) this.glowLayer.setBlendMode(Phaser.BlendModes.NORMAL);
-    if (this.fxOn) this.blur = this.glowLayer.postFX.addBlur(0, 2, 2, this.dpr * 1.25, 0xffffff, 2);
+    if (this.fxOn) this.blur = this.glowLayer.postFX.addBlur(1, 2, 2, this.dpr * 0.95, 0xffffff, 3);
     const W = this.scale.width, H = this.scale.height;
     this.bakeGlow = this.make.renderTexture({ x: 0, y: 0, width: W, height: H }, false).setOrigin(0);
     this.glowLayer.add(this.bakeGlow);
@@ -148,7 +153,7 @@ export class BoardScene extends Phaser.Scene {
     this.scratchCore = this.make.graphics({}, false);
     this.dimRect = this.add.rectangle(0, 0, W, H, 0x02040b, 1).setOrigin(0).setDepth(15).setAlpha(0);
     this.hintRings = [0, 1, 2].map(() => this.add.image(0, 0, "ring-thin").setBlendMode(Phaser.BlendModes.ADD).setDepth(17).setVisible(false));
-    this.rings = [0x7feaff, 0xff6ab8, 0xffd56a].map((c) => this.add.image(0, 0, "ring").setTint(c).setBlendMode(Phaser.BlendModes.ADD).setDepth(18).setVisible(false));
+    this.rings = [0x7feaff, 0xff6ab8, 0xffd56a].map((c) => this.add.image(0, 0, "band").setTint(c).setBlendMode(Phaser.BlendModes.ADD).setDepth(18).setVisible(false));
     this.dots = this.add.graphics();
     this.rim = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
     this.trailG = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
@@ -234,10 +239,12 @@ export class BoardScene extends Phaser.Scene {
     this.rimTarget = 1;
     const b = this.board!;
     const cx = this.ox + (b.w * this.cs) / 2, cy = this.oy + (b.h * this.cs) / 2;
-    const maxR = Math.hypot(this.scale.width, this.scale.height) * 0.75;
+    // Prism wipe: three refracted bands sweep up through the cleared board.
+    const W = this.scale.width, top = this.oy - this.cs, bottom = this.oy + b.h * this.cs + this.cs;
     this.rings.forEach((r, k) => {
-      r.setPosition(cx, cy).setScale(0.05).setAlpha(0.9 - k * 0.15).setVisible(true);
-      this.tweens.add({ targets: r, scale: maxR / 128, alpha: 0, duration: 1200, delay: k * 140, ease: "Cubic.easeOut", onComplete: () => r.setVisible(false) });
+      r.setPosition(cx, bottom).setDisplaySize(W * 1.2, this.cs * 2.4).setAngle(-6 + k * 6).setAlpha(0).setVisible(true);
+      this.tweens.add({ targets: r, y: top, duration: 900, delay: k * 110, ease: "Sine.easeInOut", onComplete: () => r.setVisible(false) });
+      this.tweens.add({ targets: r, alpha: { from: 0, to: 0.85 }, duration: 450, delay: k * 110, yoyo: true, ease: "Sine.easeInOut" });
     });
     this.sparks.setParticleTint(0xffffff);
     this.sparks.emitParticleAt(cx, cy, 40);
@@ -582,14 +589,13 @@ export class BoardScene extends Phaser.Scene {
     // Additive outer glow.
     const hp = px[px.length - 1]!;
     if (this.fxOn) {
-      const gw = cs * 0.78, gA = Math.min(1, 0.42 * bright) * ga;
+      const gw = cs * 0.46, gA = Math.min(1, 0.5 * bright) * ga;
       g.lineStyle(gw, glowColor, gA); stroke(g, px);
       g.fillStyle(glowColor, gA);
       g.fillCircle(px[0]!.x, px[0]!.y, gw / 2);
-      g.fillCircle(hp.x, hp.y, gw / 2);
     } else {
       // No blur pass: an opaque, pre-mixed halo with round joints (no doubled alpha at corners).
-      const gw = cs * 0.66, halo = mix(BG.top, glowColor, Math.min(0.6, 0.24 * bright));
+      const gw = cs * 0.38, halo = mix(BG.top, glowColor, Math.min(0.6, 0.28 * bright));
       g.lineStyle(gw, halo, 1); stroke(g, px);
       g.fillStyle(halo, 1);
       for (const p of px) g.fillCircle(p.x, p.y, gw / 2);
@@ -601,16 +607,17 @@ export class BoardScene extends Phaser.Scene {
     c.fillStyle(color, ga);
     for (const p of px) c.fillCircle(p.x, p.y, w / 2);
     // Inner highlight.
-    c.lineStyle(w * 0.28, mix(color, 0xffffff, 0.55), 0.5 * ga); stroke(c, px);
+    c.lineStyle(w * 0.3, mix(color, 0xffffff, 0.6), 0.55 * ga); stroke(c, px);
 
-    // Colour-blind stroke pattern (subtle by default, strong with assist).
+    // Colour assist only: per-colour stroke patterns. By default colour alone carries the rule,
+    // so reading the board is part of the puzzle.
     const strong = this.colorAssist;
     const dark = 0x060914;
-    if (v.style.pattern === "dots") {
-      c.fillStyle(dark, (strong ? 0.85 : 0.45) * ga);
-      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * (strong ? 0.22 : 0.15));
-    } else if (v.style.pattern === "stripe") {
-      c.lineStyle(w * (strong ? 0.26 : 0.16), dark, (strong ? 0.8 : 0.45) * ga);
+    if (strong && v.style.pattern === "dots") {
+      c.fillStyle(dark, 0.85 * ga);
+      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * 0.36);
+    } else if (strong && v.style.pattern === "stripe") {
+      c.lineStyle(w * 0.4, dark, 0.8 * ga);
       stroke(c, px.slice(0, Math.max(2, px.length)), true);
     }
 
@@ -618,34 +625,32 @@ export class BoardScene extends Phaser.Scene {
   }
 
   private drawHead(c: Phaser.GameObjects.Graphics, p: Pt, dir: number, style: LineStyle, color: number, a: number, strong: boolean): void {
-    const s = this.cs * (strong ? 1.1 : 1);
+    const s = this.cs; // one head size everywhere
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
-    const head = mix(color, 0xffffff, 0.7);
-    const dark = 0x050814;
-    const key = s * 0.085; // dark keyline separating the head from its own body
-    const shape = (pts: Pt[]) => {
-      c.lineStyle(key, dark, 0.9 * a); c.strokePoints(pts, true, true);
-      c.fillStyle(head, a); c.fillPoints(pts, true, true);
-    };
-    const chev = (u0: number, size: number, width: number) => {
-      c.lineStyle(width, dark, 0.9 * a);
-      c.beginPath();
-      const a1 = at(u0 - size, size * 1.05), a2 = at(u0 + size * 0.7, 0), a3 = at(u0 - size, -size * 1.05);
-      c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.lineTo(a3.x, a3.y);
-      c.strokePath();
-    };
-    if (style.head === "chevron") {
-      // Crisp arrowhead, wider than the body so direction reads at a glance.
-      shape([at(0.5, 0), at(-0.04, 0.4), at(0.08, 0), at(-0.04, -0.4)]);
-    } else if (style.head === "diamond") {
-      shape([at(0.52, 0), at(0.1, 0.36), at(-0.26, 0), at(0.1, -0.36)]);
-      chev(0.12, 0.13, s * 0.075);
+    // Classic arrowheads in the line's own colour, starting where the line ends (cell centre)
+    // and stopping inside the cell: one continuous arrow, never overlapping a neighbour.
+    // Uniform solid heads by default; with colour assist each colour gets its own silhouette.
+    // The bend sits at the cell centre; a short shaft carries the line to the head, whose tip
+    // stops just inside the cell edge — so turned heads read as a clean "L into arrow".
+    const w = this.cs * STROKE;
+    const base = 0.12, tip = 0.48;
+    const mid = at(0, 0), sh = at(base + 0.04, 0);
+    c.lineStyle(w, color, a);
+    c.lineBetween(mid.x, mid.y, sh.x, sh.y);
+    c.fillStyle(color, a);
+    const shape = strong ? style.head : "solid";
+    if (shape === "solid") {
+      c.fillPoints([at(tip, 0), at(base, 0.28), at(base, -0.28)], true, true);
+    } else if (shape === "barbed") {
+      c.fillPoints([at(tip, 0), at(base - 0.03, 0.3), at(base + 0.1, 0), at(base - 0.03, -0.3)], true, true);
     } else {
-      const cx = at(0.1, 0);
-      c.fillStyle(dark, 0.9 * a); c.fillCircle(cx.x, cx.y, s * 0.37 + key / 2);
-      c.fillStyle(head, a); c.fillCircle(cx.x, cx.y, s * 0.35);
-      chev(0.1, 0.13, s * 0.075);
+      // Open chevron: strokes the same weight as the line, spanning the same box as the solid head.
+      const t = at(tip - 0.03, 0), l = at(base - 0.02, 0.3), r = at(base - 0.02, -0.3);
+      c.lineBetween(sh.x, sh.y, t.x, t.y);
+      c.lineBetween(l.x, l.y, t.x, t.y);
+      c.lineBetween(r.x, r.y, t.x, t.y);
+      for (const q of [t, l, r]) c.fillCircle(q.x, q.y, w / 2);
     }
   }
 

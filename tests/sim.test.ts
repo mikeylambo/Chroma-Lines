@@ -152,3 +152,15 @@ test("session: lives, fail at 0, win when empty, stars by mistakes", async () =>
   assert.equal(f.tap(1).kind, "ignored");
   assert.deepEqual([starsFor(0), starsFor(1), starsFor(2)], [3, 2, 1]);
 });
+
+test("arrowheads always continue their line's last segment", () => {
+  for (let s = 1; s <= 2000; s++) {
+    const b = generate({ w: 12, h: 12, rule: "chroma", colors: 3, minLen: 3, maxLen: 12, density: 0.9 }, s);
+    for (const l of b.lines) {
+      if (l.cells.length < 2) continue;
+      const [h0, h1] = [l.cells[0]!, l.cells[1]!];
+      const dx = (h0 % 12) - (h1 % 12), dy = ((h0 / 12) | 0) - ((h1 / 12) | 0);
+      assert.deepEqual([dx, dy], [[0, -1], [1, 0], [0, 1], [-1, 0]][l.dir]);
+    }
+  }
+});
