@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { LEVEL_SPECS } from "../src/content/curveSpec.ts";
-import { campaignLevel, dailyLevel, endlessLevel } from "../src/meta/levels.ts";
+import { campaignLevel, dailyLevel, endlessBoard, endlessPoints } from "../src/meta/levels.ts";
 import { solve } from "../src/sim/solve.ts";
 import { serializeBoard } from "../src/sim/board.ts";
 import { generate } from "../src/sim/generate.ts";
@@ -54,10 +54,18 @@ test("tutorial lock: levels 1-3 match their authored structures", () => {
 });
 
 test("endless and daily boards are solvable and deterministic", () => {
-  for (let i = 61; i <= 160; i++) {
-    const a = endlessLevel(i);
-    assert.ok(solve(a.board).solved, `endless ${i}`);
-    assert.equal(serializeBoard(a.board), serializeBoard(endlessLevel(i).board));
+  for (const run of [1, 777, 0xfeedbeef]) {
+    for (let n = 1; n <= 60; n++) {
+      const a = endlessBoard(run, n);
+      assert.ok(solve(a.board).solved, `run ${run} board ${n}`);
+      assert.equal(serializeBoard(a.board), serializeBoard(endlessBoard(run, n).board));
+    }
+  }
+  // Deep runs stay solvable and generation stays fast.
+  for (const n of [100, 250, 1000]) {
+    const t = performance.now();
+    assert.ok(solve(endlessBoard(42, n).board).solved);
+    assert.ok(performance.now() - t < 500);
   }
   for (let d = 0; d < 120; d++) {
     const date = new Date(Date.UTC(2026, 0, 1 + d));
@@ -65,4 +73,16 @@ test("endless and daily boards are solvable and deterministic", () => {
     assert.ok(solve(a.board).solved);
     assert.equal(a.def.key, dailyLevel(date).def.key);
   }
+});
+
+test("endless: difficulty climbs (breathers aside) and perfect boards score more", () => {
+  const lo = (n: number) => endlessBoard(9, n).def.band[0];
+  assert.ok(lo(40) > lo(4) && lo(400) > lo(40));
+  const b = endlessBoard(9, 3).board;
+  assert.ok(endlessPoints(b, 3, 0) > endlessPoints(b, 3, 1));
+  assert.ok(endlessPoints(b, 30, 1) > endlessPoints(b, 3, 1));
+});
+
+test("daily: weekday profiles all generate solvable boards", () => {
+  for (let d = 0; d < 14; d++) assert.ok(solve(dailyLevel(new Date(Date.UTC(2026, 9, 18 + d))).board).solved);
 });

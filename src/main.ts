@@ -5,7 +5,7 @@ import { SynthAudio } from "./audio/engine.ts";
 import { CAMPAIGN_LENGTH } from "./content/curveSpec.ts";
 import { DailyLight } from "./meta/daily.ts";
 import { HintEconomy } from "./meta/hints.ts";
-import { type LevelKind, type LoadedLevel, loadLevel } from "./meta/levels.ts";
+import { endlessBoard, endlessPoints, type LevelKind, type LoadedLevel, loadLevel } from "./meta/levels.ts";
 import { Progress, starsFor } from "./meta/progress.ts";
 import { GameTelemetry } from "./meta/telemetry.ts";
 import { createPlatform } from "./platform/index.ts";
@@ -43,6 +43,7 @@ let idleTimer = 0;
 let cueTimer = 0;
 let demoTimer = 0;
 let levelStartAt = 0;
+let capT = 0;
 const cache = new Map<string, LoadedLevel>();
 
 function keyOf(kind: LevelKind, index: number): string { return kind === "daily" ? `daily:${daily.key}` : `${kind}:${index}`; }
@@ -54,9 +55,18 @@ function fetchLevel(kind: LevelKind, index: number): LoadedLevel {
 }
 function kindFor(index: number): LevelKind { return index > CAMPAIGN_LENGTH ? "endless" : "campaign"; }
 
+function runBoard(n: number): LoadedLevel {
+  const run = progress.data.endless.run!;
+  const k = `run:${run.seed}:${n}`;
+  let l = cache.get(k);
+  if (!l) { l = endlessBoard(run.seed, n); cache.set(k, l); }
+  return l;
+}
+
 function pregenerateNext(): void {
   const idle = (cb: () => void) => ("requestIdleCallback" in window ? (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(cb) : setTimeout(cb, 300));
   if (current.def.kind === "daily") return;
+  if (current.def.kind === "endless") { const n = current.def.index + 1; idle(() => runBoard(n)); return; }
   const next = current.def.index + 1;
   idle(() => fetchLevel(kindFor(next), next));
 }
@@ -77,7 +87,12 @@ function start(level: LoadedLevel): void {
   ui.setLives(session.lives);
   ui.setHints(hints.count);
   ui.pulseHint(false);
-  ui.setLevel(level.def.kind, level.def.index, daily.streak);
+  if (level.def.kind === "endless") {
+    const run = progress.data.endless.run!;
+    session.lives = run.lives;
+    ui.setLives(run.lives);
+    ui.setLevel("endless", level.def.index, run.score);
+  } else ui.setLevel(level.def.kind, level.def.index, daily.streak);
   scene.setLocked(false);
   scene.setDim(false);
   scene.loadBoard(level.board);
@@ -85,7 +100,7 @@ function start(level: LoadedLevel): void {
   telemetry.begin(level.def);
   debug?.update(level, session);
   if (level.def.kind === "daily") daily.markAttempt();
-  else if (level.def.kind === "campaign" || level.def.kind === "endless") {
+  else if (level.def.kind === "campaign") {
     progress.data.current = level.def.index;
     void progress.save();
   }
@@ -95,7 +110,40 @@ function start(level: LoadedLevel): void {
 }
 
 function startIndex(index: number): void {
+  if (index > CAMPAIGN_LENGTH) { startRun(false); return; }
   start(fetchLevel(kindFor(index), index));
+}
+
+// ---------------- Endless runs ----------------
+// Lives carry across boards; the run ends at zero. Score = Σ board points; best is the leaderboard score.
+
+function startRun(fresh: boolean): void {
+  const e = progress.data.endless;
+  if (fresh || !e.run) {
+    e.run = { seed: (Math.random() * 0xffffffff) >>> 0, n: 1, score: 0, lives: 3 };
+    e.runs++;
+    void progress.save();
+  }
+  lifecycle.setGamePaused(false);
+  start(runBoard(e.run.n));
+}
+
+function endRun(): void {
+  const e = progress.data.endless;
+  const run = e.run!;
+  const newBest = run.score > e.best;
+  e.best = Math.max(e.best, run.score);
+  e.bestBoards = Math.max(e.bestBoards, run.n - 1);
+  e.run = null;
+  void progress.save();
+  platform.submitScore(e.best);
+  telemetry.emit("level_fail", { mistakes: session.mistakes, runScore: run.score, boards: run.n - 1 });
+  setTimeout(() => {
+    audio.fail();
+    scene.setDim(true);
+    ui.setHudVisible(false);
+    ui.showRunOver(run.score, e.best, newBest, run.n - 1);
+  }, 420);
 }
 
 function restartSame(): void {
@@ -180,6 +228,7 @@ function onTap(line: number): void {
     audio.bump();
     haptics.pulse("bump");
     ui.setLives(r.lives, true);
+    if (current.def.kind === "endless") { progress.data.endless.run!.lives = r.lives; void progress.save(); }
     telemetry.emit("tap_blocked", { line, blocker: r.blocker });
     telemetry.emit("life_lost", { lives: r.lives });
     if (r.failed) fail();
@@ -197,15 +246,25 @@ function win(): void {
   const stars = starsFor(session.mistakes);
   const def = current.def;
   let hintEarned = false;
-  let dailyInfo: { streak: number } | undefined;
+  let dailyInfo: { streak: number; share: () => void } | undefined;
+  let endlessInfo: { points: number; total: number } | undefined;
   if (def.kind === "daily") {
     hintEarned = daily.complete() > 0;
-    dailyInfo = { streak: daily.streak };
+    dailyInfo = { streak: daily.streak, share: () => shareDaily(stars) };
     telemetry.emit("daily_complete", { stars, streak: daily.streak });
-    platform.submitScore(stars);
+  } else if (def.kind === "endless") {
+    const e = progress.data.endless, run = e.run!;
+    const points = endlessPoints(current.board, def.index, session.mistakes);
+    run.score += points;
+    run.n = def.index + 1;
+    run.lives = session.lives;
+    if (stars === 3) hintEarned = (progress.data.hints++, true);
+    if (run.score > e.best) { e.best = run.score; platform.submitScore(e.best); }
+    e.bestBoards = Math.max(e.bestBoards, def.index);
+    endlessInfo = { points, total: run.score };
+    ui.setLevel("endless", def.index, run.score);
   } else {
     hintEarned = progress.recordClear(def.index, stars) > 0;
-    platform.submitScore(progress.totalStars());
   }
   void progress.save();
   ui.setHints(hints.count);
@@ -213,13 +272,22 @@ function win(): void {
   setTimeout(() => { audio.chord(); scene.winSweep(); }, 380);
   setTimeout(() => {
     ui.setHudVisible(false);
-    ui.showResults(stars, { hintEarned, daily: dailyInfo, onStar: (i) => audio.tick(i) });
+    ui.showResults(stars, { hintEarned, daily: dailyInfo, endless: endlessInfo, onStar: (i) => audio.tick(i) });
   }, 1150);
+}
+
+function shareDaily(stars: number): void {
+  const day = daily.key.replace("daily:", "");
+  const text = `Chroma Lines · Daily Light ${day}\n${"★".repeat(stars)}${"☆".repeat(3 - stars)}  🔥${daily.streak}\n${location.origin}`;
+  const nav = navigator as Navigator & { share?: (d: { text: string }) => Promise<void> };
+  if (nav.share) void nav.share({ text }).catch(() => undefined);
+  else void navigator.clipboard?.writeText(text).then(() => ui.toast("✓"), () => undefined);
 }
 
 function fail(): void {
   ended = true;
   scene.setLocked(true);
+  if (current.def.kind === "endless") { endRun(); return; }
   telemetry.emit("level_fail", { mistakes: session.mistakes });
   setTimeout(() => {
     audio.fail();
@@ -233,6 +301,7 @@ function next(): void {
   audio.ui();
   const def = current.def;
   if (def.kind === "daily") { startIndex(Math.min(progress.data.unlocked, progress.data.current)); return; }
+  if (def.kind === "endless") { start(runBoard(def.index + 1)); return; }
   const n = def.index + 1;
   // Chapter complete: show the map on the way to the next chapter.
   if (def.kind === "campaign" && def.index % 10 === 0) {
@@ -291,6 +360,7 @@ function openMap(focusChapter?: number): void {
     current: Math.min(progress.data.current, progress.data.unlocked),
     stars: progress.data.stars,
     daily: { streak: daily.streak, done: daily.completedToday, attempted: daily.attemptedToday },
+    endlessBest: progress.data.endless.best,
     focusChapter,
   });
 }
@@ -315,8 +385,8 @@ async function boot(): Promise<void> {
 
   ui = new UI(document.getElementById("ui")!, {
     pause, resume, hint: useHint, next,
-    replay: () => { audio.ui(); start(current.def.kind === "daily" ? current : fetchLevel(current.def.kind, current.def.index)); },
-    retry: () => { audio.ui(); restartSame(); },
+    replay: () => { audio.ui(); start(current.def.kind === "campaign" ? fetchLevel("campaign", current.def.index) : current); },
+    retry: () => { audio.ui(); if (current.def.kind === "endless") startRun(true); else restartSame(); },
     toggleSound: () => { s.muted = !s.muted; audio.setMuted(s.muted); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
     toggleAssist: () => { s.colorAssist = !s.colorAssist; scene.setColorAssist(s.colorAssist); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
     openMap: () => openMap(),
@@ -389,6 +459,10 @@ async function boot(): Promise<void> {
     tap: (i: number) => onTap(i),
     save: () => structuredClone(progress.data),
     telemetry: () => telemetry.recorder.snapshot(),
+    // Store-art / trailer capture: freeze the real loop and advance in fixed steps.
+    freeze: () => { game.loop.sleep(); capT = performance.now(); },
+    advance: (ms: number, fps = 30) => { for (let t = 0; t < ms; t += 1000 / fps) { capT += 1000 / fps; game.step(capT, 1000 / fps); } },
+    hud: (on: boolean) => { ui.setHudVisible(on); document.body.classList.toggle("capture", !on); },
   };
 }
 

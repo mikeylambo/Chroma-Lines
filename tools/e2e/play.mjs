@@ -71,10 +71,20 @@ try {
     await page.screenshot({ path: `${OUT}/${name}.png` });
     await playLevel({ fast: true, shotMid: `${OUT}/${name}-mid.png` });
     await page.waitForTimeout(2000);
-    const st = await page.evaluate((l) => window.__chroma.save().stars[l], lvl);
-    check(`L${lvl} clears end-to-end`, st >= 1, `stars=${st}`);
+    const st = await page.evaluate((l) => l > 60 ? window.__chroma.save().endless.run?.score ?? 0 : window.__chroma.save().stars[l], lvl);
+    check(lvl > 60 ? "endless board scores into the run" : `L${lvl} clears end-to-end`, st >= 1, `${lvl > 60 ? "score" : "stars"}=${st}`);
   }
   await page.screenshot({ path: `${OUT}/09-results-late.png` });
+
+  // Endless run over: burn the run's lives.
+  await page.goto(`${url}?level=61`);
+  await page.waitForFunction(() => window.__chroma && window.__chroma.level());
+  await page.waitForTimeout(600);
+  for (let k = 0; k < 3; k++) { const b = await page.evaluate(() => window.__chroma.blocked()); if (!b.length) break; await page.evaluate((i) => window.__chroma.tap(i), b[0]); await page.waitForTimeout(250); }
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: `${OUT}/09b-runover.png` });
+  const e = await page.evaluate(() => window.__chroma.save().endless);
+  check("endless run over records best and clears run", e.best > 0 && e.run === null, `best=${e.best}`);
 
   // Fail flow.
   await page.goto(`${url}?level=12`);
@@ -99,6 +109,7 @@ try {
   await page.locator('button[aria-label="Chapter map"]').click();
   await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/12-map.png` });
+  await page.screenshot({ path: `${OUT}/12b-map-bottom.png`, fullPage: false });
   await page.locator(".daily-go").click();
   await page.waitForTimeout(900);
   check("Daily Light loads", (await page.evaluate(() => window.__chroma.level().kind)) === "daily");
@@ -112,7 +123,7 @@ try {
   await page.reload();
   await page.waitForFunction(() => window.__chroma && window.__chroma.level());
   const after = await page.evaluate(() => window.__chroma.save());
-  check("save persists across reload", after.stars[1] === 3 && after.daily.streak === 1 && after.stars[61] >= 1);
+  check("save persists across reload", after.stars[1] === 3 && after.daily.streak === 1 && after.endless.best > 0);
 
   // Hint usage.
   const h0 = after.hints;

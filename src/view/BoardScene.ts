@@ -10,7 +10,7 @@ const BUMP_MS = 120;
 const BUMP_DIST = 0.25; // cells
 const HURT_MS = 420; // two red-white pulses
 const TOUCH_BRIGHT = 0.3;
-const STROKE = 0.42; // of cell
+const STROKE = 0.24; // of cell — thin enough that heads never overlap neighbours
 const BUMP_TRAUMA = 0.25;
 const MAX_CELL_PX = 76;
 
@@ -589,14 +589,14 @@ export class BoardScene extends Phaser.Scene {
     // Additive outer glow.
     const hp = px[px.length - 1]!;
     if (this.fxOn) {
-      const gw = cs * 0.78, gA = Math.min(1, 0.42 * bright) * ga;
+      const gw = cs * 0.46, gA = Math.min(1, 0.5 * bright) * ga;
       g.lineStyle(gw, glowColor, gA); stroke(g, px);
       g.fillStyle(glowColor, gA);
       g.fillCircle(px[0]!.x, px[0]!.y, gw / 2);
       g.fillCircle(hp.x, hp.y, gw / 2);
     } else {
       // No blur pass: an opaque, pre-mixed halo with round joints (no doubled alpha at corners).
-      const gw = cs * 0.66, halo = mix(BG.top, glowColor, Math.min(0.6, 0.24 * bright));
+      const gw = cs * 0.38, halo = mix(BG.top, glowColor, Math.min(0.6, 0.28 * bright));
       g.lineStyle(gw, halo, 1); stroke(g, px);
       g.fillStyle(halo, 1);
       for (const p of px) g.fillCircle(p.x, p.y, gw / 2);
@@ -608,16 +608,16 @@ export class BoardScene extends Phaser.Scene {
     c.fillStyle(color, ga);
     for (const p of px) c.fillCircle(p.x, p.y, w / 2);
     // Inner highlight.
-    c.lineStyle(w * 0.28, mix(color, 0xffffff, 0.55), 0.5 * ga); stroke(c, px);
+    c.lineStyle(w * 0.3, mix(color, 0xffffff, 0.6), 0.55 * ga); stroke(c, px);
 
     // Colour-blind stroke pattern (subtle by default, strong with assist).
     const strong = this.colorAssist;
     const dark = 0x060914;
     if (v.style.pattern === "dots") {
       c.fillStyle(dark, (strong ? 0.85 : 0.45) * ga);
-      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * (strong ? 0.22 : 0.15));
+      for (let i = 0; i < px.length - 1; i++) c.fillCircle(px[i]!.x, px[i]!.y, w * (strong ? 0.36 : 0.26));
     } else if (v.style.pattern === "stripe") {
-      c.lineStyle(w * (strong ? 0.26 : 0.16), dark, (strong ? 0.8 : 0.45) * ga);
+      c.lineStyle(w * (strong ? 0.4 : 0.28), dark, (strong ? 0.8 : 0.5) * ga);
       stroke(c, px.slice(0, Math.max(2, px.length)), true);
     }
 
@@ -628,37 +628,17 @@ export class BoardScene extends Phaser.Scene {
     const s = this.cs * (strong ? 1.1 : 1);
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
-    // Heads: no hard outline. A soft dark underlay cuts the head out of its own body
-    // (crucial when the head turns off the last segment), then an opaque near-white head.
-    const head = mix(color, 0xffffff, 0.82);
-    const dark = 0x050814;
-    const grow = (pts: Pt[], k: number) => {
-      const cx = pts.reduce((a, q) => a + q.x, 0) / pts.length, cy = pts.reduce((a, q) => a + q.y, 0) / pts.length;
-      return pts.map((q) => ({ x: cx + (q.x - cx) * k, y: cy + (q.y - cy) * k }));
-    };
-    const shape = (pts: Pt[]) => {
-      c.fillStyle(dark, 0.18 * a); c.fillPoints(grow(pts, 1.32), true, true);
-      c.fillStyle(dark, 0.32 * a); c.fillPoints(grow(pts, 1.16), true, true);
-      c.fillStyle(head, a); c.fillPoints(pts, true, true);
-    };
-    const chev = (u0: number, size: number, width: number) => {
-      c.lineStyle(width, dark, 0.85 * a);
-      c.beginPath();
-      const a1 = at(u0 - size, size * 1.05), a2 = at(u0 + size * 0.7, 0), a3 = at(u0 - size, -size * 1.05);
-      c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.lineTo(a3.x, a3.y);
-      c.strokePath();
-    };
+    // Solid heads sized inside their cell (Arrow-style): crisp, no outline, no overlap.
+    const head = mix(color, 0xffffff, 0.25);
+    c.fillStyle(head, a);
     if (style.head === "chevron") {
-      shape([at(0.5, 0), at(-0.04, 0.4), at(0.1, 0), at(-0.04, -0.4)]);
+      c.fillPoints([at(0.46, 0), at(-0.06, 0.36), at(-0.06, -0.36)], true, true);
     } else if (style.head === "diamond") {
-      shape([at(0.52, 0), at(0.1, 0.36), at(-0.26, 0), at(0.1, -0.36)]);
-      chev(0.12, 0.13, s * 0.075);
+      c.fillPoints([at(0.46, 0), at(0.1, 0.32), at(-0.24, 0), at(0.1, -0.32)], true, true);
     } else {
-      const cx = at(0.1, 0);
-      c.fillStyle(dark, 0.18 * a); c.fillCircle(cx.x, cx.y, s * 0.46);
-      c.fillStyle(dark, 0.32 * a); c.fillCircle(cx.x, cx.y, s * 0.4);
-      c.fillStyle(head, a); c.fillCircle(cx.x, cx.y, s * 0.35);
-      chev(0.1, 0.13, s * 0.075);
+      const o = at(0.02, 0);
+      c.fillCircle(o.x, o.y, s * 0.25);
+      c.fillPoints([at(0.44, 0), at(0.1, 0.2), at(0.1, -0.2)], true, true);
     }
   }
 

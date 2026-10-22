@@ -17,7 +17,10 @@ export interface SaveData {
   daily: { lastKey: string | null; lastPlayedKey: string | null; streak: number; best: number };
   settings: Settings;
   seen: { aha: boolean; passClears: number };
+  endless: { best: number; bestBoards: number; runs: number; run: EndlessRun | null };
 }
+
+export interface EndlessRun { seed: number; n: number; score: number; lives: number }
 
 export const DEFAULT_SAVE: SaveData = {
   unlocked: 1,
@@ -27,6 +30,7 @@ export const DEFAULT_SAVE: SaveData = {
   daily: { lastKey: null, lastPlayedKey: null, streak: 0, best: 0 },
   settings: { muted: false, colorAssist: false, haptics: true },
   seen: { aha: false, passClears: 0 },
+  endless: { best: 0, bestBoards: 0, runs: 0, run: null },
 };
 
 /** Fill any fields missing from older saves with defaults (never drop player state). */
@@ -39,6 +43,7 @@ export function normalizeSave(raw: Partial<SaveData> | null): SaveData {
     daily: { ...d.daily, ...(raw.daily ?? {}) },
     settings: { ...d.settings, ...(raw.settings ?? {}) },
     seen: { ...d.seen, ...(raw.seen ?? {}) },
+    endless: { ...d.endless, ...(raw.endless ?? {}) },
     stars: { ...(raw.stars ?? {}) },
   };
 }
