@@ -50,7 +50,8 @@ export function starsFor(mistakes: number): number {
 export class Progress {
   data: SaveData = structuredClone(DEFAULT_SAVE);
   private saving: Promise<void> = Promise.resolve();
-  constructor(private readonly platform: PlatformAdapter) {}
+  private readonly platform: PlatformAdapter;
+  constructor(platform: PlatformAdapter) { this.platform = platform; }
 
   async load(): Promise<void> {
     try { this.data = normalizeSave(await this.platform.load<SaveData>()); } catch { this.data = structuredClone(DEFAULT_SAVE); }

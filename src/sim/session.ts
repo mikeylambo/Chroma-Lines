@@ -15,7 +15,10 @@ export class PlaySession {
   clears = 0;
   over: "won" | "failed" | null = null;
 
-  constructor(readonly board: Board) {
+  readonly board: Board;
+
+  constructor(board: Board) {
+    this.board = board;
     this.state = new BoardState(board);
   }
 
