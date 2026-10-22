@@ -116,6 +116,11 @@ export class BoardScene extends Phaser.Scene {
     grad.addColorStop(0.9, "rgba(255,255,255,1)");
     grad.addColorStop(1, "rgba(255,255,255,0)");
     rc.fillStyle = grad; rc.fillRect(0, 0, 256, 256); ring.refresh();
+    const band = this.textures.createCanvas("band", 8, 128)!;
+    const bc = band.getContext();
+    const bg2 = bc.createLinearGradient(0, 0, 0, 128);
+    bg2.addColorStop(0, "rgba(255,255,255,0)"); bg2.addColorStop(0.5, "rgba(255,255,255,1)"); bg2.addColorStop(1, "rgba(255,255,255,0)");
+    bc.fillStyle = bg2; bc.fillRect(0, 0, 8, 128); band.refresh();
     const thin = this.textures.createCanvas("ring-thin", 128, 128)!;
     const tc = thin.getContext();
     const tg = tc.createRadialGradient(64, 64, 0, 64, 64, 64);
@@ -148,7 +153,7 @@ export class BoardScene extends Phaser.Scene {
     this.scratchCore = this.make.graphics({}, false);
     this.dimRect = this.add.rectangle(0, 0, W, H, 0x02040b, 1).setOrigin(0).setDepth(15).setAlpha(0);
     this.hintRings = [0, 1, 2].map(() => this.add.image(0, 0, "ring-thin").setBlendMode(Phaser.BlendModes.ADD).setDepth(17).setVisible(false));
-    this.rings = [0x7feaff, 0xff6ab8, 0xffd56a].map((c) => this.add.image(0, 0, "ring").setTint(c).setBlendMode(Phaser.BlendModes.ADD).setDepth(18).setVisible(false));
+    this.rings = [0x7feaff, 0xff6ab8, 0xffd56a].map((c) => this.add.image(0, 0, "band").setTint(c).setBlendMode(Phaser.BlendModes.ADD).setDepth(18).setVisible(false));
     this.dots = this.add.graphics();
     this.rim = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
     this.trailG = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
@@ -234,10 +239,12 @@ export class BoardScene extends Phaser.Scene {
     this.rimTarget = 1;
     const b = this.board!;
     const cx = this.ox + (b.w * this.cs) / 2, cy = this.oy + (b.h * this.cs) / 2;
-    const maxR = Math.hypot(this.scale.width, this.scale.height) * 0.75;
+    // Prism wipe: three refracted bands sweep up through the cleared board.
+    const W = this.scale.width, top = this.oy - this.cs, bottom = this.oy + b.h * this.cs + this.cs;
     this.rings.forEach((r, k) => {
-      r.setPosition(cx, cy).setScale(0.05).setAlpha(0.9 - k * 0.15).setVisible(true);
-      this.tweens.add({ targets: r, scale: maxR / 128, alpha: 0, duration: 1200, delay: k * 140, ease: "Cubic.easeOut", onComplete: () => r.setVisible(false) });
+      r.setPosition(cx, bottom).setDisplaySize(W * 1.2, this.cs * 2.4).setAngle(-6 + k * 6).setAlpha(0).setVisible(true);
+      this.tweens.add({ targets: r, y: top, duration: 900, delay: k * 110, ease: "Sine.easeInOut", onComplete: () => r.setVisible(false) });
+      this.tweens.add({ targets: r, alpha: { from: 0, to: 0.85 }, duration: 450, delay: k * 110, yoyo: true, ease: "Sine.easeInOut" });
     });
     this.sparks.setParticleTint(0xffffff);
     this.sparks.emitParticleAt(cx, cy, 40);
@@ -621,29 +628,35 @@ export class BoardScene extends Phaser.Scene {
     const s = this.cs * (strong ? 1.1 : 1);
     const dx = DX[dir as 0], dy = DY[dir as 0];
     const at = (u: number, v: number) => ({ x: p.x + (u * dx - v * dy) * s, y: p.y + (u * dy + v * dx) * s });
-    const head = mix(color, 0xffffff, 0.7);
+    // Heads: no hard outline. A soft dark underlay cuts the head out of its own body
+    // (crucial when the head turns off the last segment), then an opaque near-white head.
+    const head = mix(color, 0xffffff, 0.82);
     const dark = 0x050814;
-    const key = s * 0.085; // dark keyline separating the head from its own body
+    const grow = (pts: Pt[], k: number) => {
+      const cx = pts.reduce((a, q) => a + q.x, 0) / pts.length, cy = pts.reduce((a, q) => a + q.y, 0) / pts.length;
+      return pts.map((q) => ({ x: cx + (q.x - cx) * k, y: cy + (q.y - cy) * k }));
+    };
     const shape = (pts: Pt[]) => {
-      c.lineStyle(key, dark, 0.9 * a); c.strokePoints(pts, true, true);
+      c.fillStyle(dark, 0.18 * a); c.fillPoints(grow(pts, 1.32), true, true);
+      c.fillStyle(dark, 0.32 * a); c.fillPoints(grow(pts, 1.16), true, true);
       c.fillStyle(head, a); c.fillPoints(pts, true, true);
     };
     const chev = (u0: number, size: number, width: number) => {
-      c.lineStyle(width, dark, 0.9 * a);
+      c.lineStyle(width, dark, 0.85 * a);
       c.beginPath();
       const a1 = at(u0 - size, size * 1.05), a2 = at(u0 + size * 0.7, 0), a3 = at(u0 - size, -size * 1.05);
       c.moveTo(a1.x, a1.y); c.lineTo(a2.x, a2.y); c.lineTo(a3.x, a3.y);
       c.strokePath();
     };
     if (style.head === "chevron") {
-      // Crisp arrowhead, wider than the body so direction reads at a glance.
-      shape([at(0.5, 0), at(-0.04, 0.4), at(0.08, 0), at(-0.04, -0.4)]);
+      shape([at(0.5, 0), at(-0.04, 0.4), at(0.1, 0), at(-0.04, -0.4)]);
     } else if (style.head === "diamond") {
       shape([at(0.52, 0), at(0.1, 0.36), at(-0.26, 0), at(0.1, -0.36)]);
       chev(0.12, 0.13, s * 0.075);
     } else {
       const cx = at(0.1, 0);
-      c.fillStyle(dark, 0.9 * a); c.fillCircle(cx.x, cx.y, s * 0.37 + key / 2);
+      c.fillStyle(dark, 0.18 * a); c.fillCircle(cx.x, cx.y, s * 0.46);
+      c.fillStyle(dark, 0.32 * a); c.fillCircle(cx.x, cx.y, s * 0.4);
       c.fillStyle(head, a); c.fillCircle(cx.x, cx.y, s * 0.35);
       chev(0.1, 0.13, s * 0.075);
     }

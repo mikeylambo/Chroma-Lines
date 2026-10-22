@@ -12,7 +12,8 @@ const I = {
   sun: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7L7 17M17 7l1.7-1.7"/></g></svg>`,
   bulb: `<svg viewBox="0 0 24 24"><path d="M12 2.8a6.6 6.6 0 0 0-3.9 11.9c.6.5.9 1.1.9 1.8v.8h6v-.8c0-.7.3-1.3.9-1.8A6.6 6.6 0 0 0 12 2.8z"/><rect x="9" y="18.6" width="6" height="2.2" rx="1.1"/></svg>`,
   close: `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>`,
-  star: `<svg viewBox="0 0 24 24"><path d="M12 2.6l2.9 6 6.5.8-4.8 4.5 1.2 6.5L12 17.2l-5.8 3.2 1.2-6.5-4.8-4.5 6.5-.8z"/></svg>`,
+  // Rating glyph: a prism shard (three per board, one per SLU colour) — not a star.
+  star: `<svg viewBox="0 0 24 24"><path d="M12 1.5l6 7.5-2.6 13.5H8.6L6 9z"/><path d="M6 9h12M12 1.5L9.6 9l2.4 13.5L14.4 9z" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width=".9" stroke-linejoin="round"/></svg>`,
   lock: `<svg viewBox="0 0 24 24"><rect x="5.5" y="10.5" width="13" height="10" rx="2.2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
   check: `<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   infinity: `<svg viewBox="0 0 24 24"><path d="M7 8.5a3.5 3.5 0 1 0 0 7c3 0 7-7 10-7a3.5 3.5 0 1 1 0 7c-3 0-7-7-10-7z" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
@@ -164,7 +165,7 @@ export class UI {
   showResults(stars: number, opts: { hintEarned: boolean; daily?: { streak: number }; onStar: (i: number) => void }): void {
     const card = h("div", "card results");
     const row = h("div", "stars");
-    const slots = [0, 1, 2].map(() => { const s = h("i", "star", I.star); row.append(s); return s; });
+    const slots = [0, 1, 2].map((k) => { const s = h("i", `star s${k}`, I.star); row.append(s); return s; });
     card.append(row);
     if (opts.daily) card.append(h("div", "streak", `${I.sun}<span>${opts.daily.streak}</span>`));
     if (opts.hintEarned) card.append(h("div", "earned", `${I.bulb}<span>+1</span>`));
@@ -212,7 +213,7 @@ export class UI {
         const node = btn(`node ${locked ? "locked" : ""} ${lvl === m.current ? "current" : ""} ${lvl % 5 === 0 ? "breather" : ""}`, locked ? I.lock : `<span>${lvl}</span>`, `Level ${lvl}`, () => { if (!locked) this.on.playLevel(lvl); });
         node.style.setProperty("--x", String(Math.sin(i * 0.9) * 34));
         const st = m.stars[lvl] ?? 0;
-        if (st > 0) node.append(h("div", "nstars", [0, 1, 2].map((k) => `<i class="${k < st ? "on" : ""}">${I.star}</i>`).join("")));
+        if (st > 0) node.append(h("div", "nstars", [0, 1, 2].map((k) => `<i class="s${k} ${k < st ? "on" : ""}">${I.star}</i>`).join("")));
         if (lvl === m.current) focusEl = node;
         path.append(node);
       }

@@ -1,5 +1,5 @@
 {
-  "mono": { "line": "#d9fbff", "glow": "#7fe9ff" },
+  "mono": { "line": "#b6f1ff", "glow": "#7fe9ff" },
   "chroma": [
     { "line": "#3ee8ff", "glow": "#1fb8ff", "head": "chevron", "pattern": "solid" },
     { "line": "#ff4fae", "glow": "#ff2d86", "head": "diamond", "pattern": "dots" },
