@@ -1,0 +1,11 @@
+{
+  "mono": { "line": "#d9fbff", "glow": "#7fe9ff" },
+  "chroma": [
+    { "line": "#3ee8ff", "glow": "#1fb8ff", "head": "chevron", "pattern": "solid" },
+    { "line": "#ff4fae", "glow": "#ff2d86", "head": "diamond", "pattern": "dots" },
+    { "line": "#ffd04a", "glow": "#ffa21f", "head": "circle", "pattern": "stripe" }
+  ],
+  "background": { "top": "#070b1c", "bottom": "#02030a", "accent": "#0d1838", "dot": "#2a3a66" },
+  "fail": "#ff4a5f",
+  "flash": "#ffffff"
+}

@@ -1,25 +1,375 @@
-import {
-  createGameApp,
-  createPuzzleAssembly,
-  PhaserAdapter,
-  mountBrowserDevConsole
-} from "@slu/web-shell";
+import Phaser from "phaser";
+import { AudioLifecycleCoordinator, BrowserHaptics } from "@slu/web-shell";
+import "./view/ui.css";
+import { SynthAudio } from "./audio/engine.ts";
+import { CAMPAIGN_LENGTH } from "./content/curveSpec.ts";
+import { DailyLight } from "./meta/daily.ts";
+import { HintEconomy } from "./meta/hints.ts";
+import { type LevelKind, type LoadedLevel, loadLevel } from "./meta/levels.ts";
+import { Progress, starsFor } from "./meta/progress.ts";
+import { GameTelemetry } from "./meta/telemetry.ts";
+import { createPlatform } from "./platform/index.ts";
+import { PlaySession } from "./sim/session.ts";
+import { criticalMove, solve } from "./sim/solve.ts";
+import { BoardScene } from "./view/BoardScene.ts";
+import { mountDebug, type DebugOverlay } from "./view/debug.ts";
+import { CSS_COLORS } from "./view/palette.ts";
+import { UI } from "./view/ui.ts";
 
-const rendererAdapter = new PhaserAdapter(); // wire your Phaser.Game hooks here
+const COMBO_WINDOW = 1200;
+const HINT_IDLE_MS = 20000;
+const params = new URLSearchParams(location.search);
 
-const app = await createGameApp({
-  gameId: "chroma-lines",
-  gameName: "Chroma Lines",
-  version: "0.1.0",
-  renderer: rendererAdapter,
-  root: document.getElementById("ui")!,
-  assemblies: [
-    (shell) => createPuzzleAssembly({ shell })
-  ]
-});
+const platform = createPlatform();
+const progress = new Progress(platform);
+const hints = new HintEconomy(progress, platform);
+const daily = new DailyLight(progress);
+const telemetry = new GameTelemetry();
+const audio = new SynthAudio();
+const lifecycle = new AudioLifecycleCoordinator(audio);
+const haptics = new BrowserHaptics({ bump: { mobile: [18], gamepad: { duration: 60, strong: 0.4, weak: 0.6 } }, clear: { mobile: [6], gamepad: { duration: 30, strong: 0, weak: 0.3 } } } as never);
 
-if (new URLSearchParams(location.search).get("dev") === "1") {
-  mountBrowserDevConsole(app.shell.studio.dev, { title: "Chroma Lines DEV" });
+let scene: BoardScene;
+let ui: UI;
+let debug: DebugOverlay | null = null;
+let current: LoadedLevel;
+let session: PlaySession;
+let combo = 0;
+let lastClearAt = -Infinity;
+let lastTapAt = performance.now();
+let paused = false;
+let ended = false;
+let idleTimer = 0;
+let cueTimer = 0;
+let demoTimer = 0;
+let levelStartAt = 0;
+const cache = new Map<string, LoadedLevel>();
+
+function keyOf(kind: LevelKind, index: number): string { return kind === "daily" ? `daily:${daily.key}` : `${kind}:${index}`; }
+function fetchLevel(kind: LevelKind, index: number): LoadedLevel {
+  const k = keyOf(kind, index);
+  let l = cache.get(k);
+  if (!l) { l = loadLevel(kind, index); cache.set(k, l); }
+  return l;
+}
+function kindFor(index: number): LevelKind { return index > CAMPAIGN_LENGTH ? "endless" : "campaign"; }
+
+function pregenerateNext(): void {
+  const idle = (cb: () => void) => ("requestIdleCallback" in window ? (window as Window & { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(cb) : setTimeout(cb, 300));
+  if (current.def.kind === "daily") return;
+  const next = current.def.index + 1;
+  idle(() => fetchLevel(kindFor(next), next));
 }
 
-console.log("SLU game ready", app);
+// ---------------- Level lifecycle ----------------
+
+function start(level: LoadedLevel): void {
+  current = level;
+  session = new PlaySession(level.board);
+  combo = 0;
+  ended = false;
+  paused = false;
+  lastTapAt = levelStartAt = performance.now();
+  clearTimeout(cueTimer);
+  clearTimeout(demoTimer);
+  ui.close();
+  ui.setHudVisible(true);
+  ui.setLives(session.lives);
+  ui.setHints(hints.count);
+  ui.pulseHint(false);
+  ui.setLevel(level.def.kind, level.def.index, daily.streak);
+  scene.setLocked(false);
+  scene.setDim(false);
+  scene.loadBoard(level.board);
+  audio.setChapter(level.def.chapter);
+  telemetry.begin(level.def);
+  debug?.update(level, session);
+  if (level.def.kind === "daily") daily.markAttempt();
+  else if (level.def.kind === "campaign" || level.def.kind === "endless") {
+    progress.data.current = level.def.index;
+    void progress.save();
+  }
+  scheduleTutorialCue();
+  maybeDemoPassThrough();
+  pregenerateNext();
+}
+
+function startIndex(index: number): void {
+  start(fetchLevel(kindFor(index), index));
+}
+
+function restartSame(): void {
+  start(current);
+}
+
+/** L1-3: if the player hesitates, a soft ripple on a free line — no words. */
+function scheduleTutorialCue(): void {
+  if (current.def.kind !== "campaign" || current.def.index > 3) return;
+  const delay = current.def.index === 3 ? 7000 : 2600;
+  cueTimer = window.setTimeout(() => {
+    if (ended || paused) return;
+    if (performance.now() - lastTapAt < delay - 50) { scheduleTutorialCue(); return; }
+    const free = session.state.freeLines();
+    if (free.length) scene.showHint(free[0]!, "cue");
+  }, delay);
+}
+
+/** First chroma board: a ghost of the free line slides through its own colour. */
+function maybeDemoPassThrough(): void {
+  if (current.def.kind !== "campaign" || current.def.index !== 11 || progress.data.seen.aha) return;
+  const st = session.state;
+  const pick = st.freeLines().find((i) => st.passThrough(i).length > 0);
+  if (pick === undefined) return;
+  const play = (n: number) => {
+    demoTimer = window.setTimeout(() => {
+      if (ended || paused || !st.alive[pick]) return;
+      scene.demoPassThrough(pick, st.passThrough(pick));
+      if (n > 1) play(n - 1);
+    }, n === 2 ? 1100 : 2000);
+  };
+  play(2);
+  progress.data.seen.aha = true;
+  void progress.save();
+}
+
+function onTap(line: number): void {
+  if (paused || ended) return;
+  lastTapAt = performance.now();
+  ui.pulseHint(false);
+  scene.clearHint();
+  clearTimeout(cueTimer);
+  const r = session.tap(line);
+  if (r.kind === "ignored") return;
+  if (r.kind === "free") {
+    const now = performance.now();
+    combo = now - lastClearAt <= COMBO_WINDOW ? combo + 1 : 0;
+    lastClearAt = now;
+    scene.exit(line, r.passThrough);
+    audio.clear(combo);
+    haptics.pulse("clear");
+    const color = current.board.rule === "mono" ? "#d9fbff" : CSS_COLORS[current.board.lines[line]!.color] ?? "#fff";
+    ui.showCombo(combo + 1, color);
+    telemetry.emit("tap_free", { line, combo });
+    if (r.won) win();
+    else scheduleTutorialCue();
+  } else {
+    scene.bump(line, r.blocker);
+    audio.bump();
+    haptics.pulse("bump");
+    ui.setLives(r.lives, true);
+    telemetry.emit("tap_blocked", { line, blocker: r.blocker });
+    telemetry.emit("life_lost", { lives: r.lives });
+    if (r.failed) fail();
+    else scheduleTutorialCue();
+  }
+  debug?.update(current, session);
+}
+
+function win(): void {
+  ended = true;
+  scene.setLocked(true);
+  const stars = starsFor(session.mistakes);
+  const def = current.def;
+  let hintEarned = false;
+  let dailyInfo: { streak: number } | undefined;
+  if (def.kind === "daily") {
+    hintEarned = daily.complete() > 0;
+    dailyInfo = { streak: daily.streak };
+    telemetry.emit("daily_complete", { stars, streak: daily.streak });
+    platform.submitScore(stars);
+  } else {
+    hintEarned = progress.recordClear(def.index, stars) > 0;
+    platform.submitScore(progress.totalStars());
+  }
+  void progress.save();
+  ui.setHints(hints.count);
+  telemetry.emit("level_clear", { stars, mistakes: session.mistakes, ms: Math.round(performance.now() - levelStartAt) });
+  setTimeout(() => { audio.chord(); scene.winSweep(); }, 380);
+  setTimeout(() => {
+    ui.setHudVisible(false);
+    ui.showResults(stars, { hintEarned, daily: dailyInfo, onStar: (i) => audio.tick(i) });
+  }, 1150);
+}
+
+function fail(): void {
+  ended = true;
+  scene.setLocked(true);
+  telemetry.emit("level_fail", { mistakes: session.mistakes });
+  setTimeout(() => {
+    audio.fail();
+    scene.setDim(true);
+    ui.setHudVisible(false);
+    ui.showFail();
+  }, 420);
+}
+
+function next(): void {
+  audio.ui();
+  const def = current.def;
+  if (def.kind === "daily") { startIndex(Math.min(progress.data.unlocked, progress.data.current)); return; }
+  const n = def.index + 1;
+  // Chapter complete: show the map on the way to the next chapter.
+  if (def.kind === "campaign" && def.index % 10 === 0) {
+    openMap(Math.min(6, def.index / 10 + 1));
+    return;
+  }
+  startIndex(n);
+}
+
+function useHint(): void {
+  if (paused || ended) return;
+  const move = criticalMove(session.state);
+  if (move < 0) return;
+  if (hints.spend()) {
+    scene.showHint(move, "hint");
+    ui.setHints(hints.count);
+    ui.pulseHint(false);
+    audio.ui();
+    telemetry.emit("hint_used", { line: move, left: hints.count });
+    lastTapAt = performance.now();
+    return;
+  }
+  void hints.adSlot("hint").then((ok) => {
+    if (ok) { ui.setHints(hints.count); useHint(); } else ui.shakeHint();
+  });
+}
+
+function pause(): void {
+  if (ended && !ui.open) return;
+  if (paused) return;
+  paused = true;
+  scene.setLocked(true);
+  lifecycle.setGamePaused(true);
+  ui.setToggles(progress.data.settings.muted, progress.data.settings.colorAssist);
+  ui.showPause();
+}
+
+function resume(): void {
+  if (!paused) { if (ended) return; }
+  paused = false;
+  lifecycle.setGamePaused(false);
+  if (ended) return;
+  ui.close();
+  ui.setHudVisible(true);
+  scene.setLocked(false);
+  lastTapAt = performance.now();
+}
+
+function openMap(focusChapter?: number): void {
+  paused = true;
+  scene.setLocked(true);
+  lifecycle.setGamePaused(false);
+  ui.setHudVisible(false);
+  ui.showMap({
+    unlocked: progress.data.unlocked,
+    current: Math.min(progress.data.current, progress.data.unlocked),
+    stars: progress.data.stars,
+    daily: { streak: daily.streak, done: daily.completedToday, attempted: daily.attemptedToday },
+    focusChapter,
+  });
+}
+
+function playDaily(): void {
+  if (daily.attemptedToday) { openMap(); return; }
+  lifecycle.setGamePaused(false);
+  start(fetchLevel("daily", 0));
+}
+
+// ---------------- Boot ----------------
+
+async function boot(): Promise<void> {
+  await platform.init();
+  await progress.load();
+  const s = progress.data.settings;
+  audio.setMuted(s.muted);
+  lifecycle.installVisibility();
+  platform.onPause(() => lifecycle.setGamePaused(true));
+  platform.onResume(() => { if (!paused) lifecycle.setGamePaused(false); });
+  platform.onAudioToggle((enabled) => audio.setMuted(!enabled || progress.data.settings.muted));
+
+  ui = new UI(document.getElementById("ui")!, {
+    pause, resume, hint: useHint, next,
+    replay: () => { audio.ui(); start(current.def.kind === "daily" ? current : fetchLevel(current.def.kind, current.def.index)); },
+    retry: () => { audio.ui(); restartSame(); },
+    toggleSound: () => { s.muted = !s.muted; audio.setMuted(s.muted); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
+    toggleAssist: () => { s.colorAssist = !s.colorAssist; scene.setColorAssist(s.colorAssist); ui.setToggles(s.muted, s.colorAssist); void progress.save(); },
+    openMap: () => openMap(),
+    playLevel: (lvl) => { lifecycle.setGamePaused(false); startIndex(lvl); },
+    playDaily,
+    firstGesture: () => audio.unlock(),
+  });
+
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  scene = new BoardScene();
+  const host = document.getElementById("game")!;
+  const game = new Phaser.Game({
+    type: Phaser.AUTO,
+    parent: host,
+    backgroundColor: "#04060f",
+    scale: { mode: Phaser.Scale.NONE, width: innerWidth * dpr, height: innerHeight * dpr, zoom: 1 / dpr },
+    render: { antialias: true, powerPreference: "high-performance" },
+    fps: { target: 60 },
+    banner: false,
+    callbacks: { preBoot: (g) => { g.registry.set("dpr", dpr); g.registry.set("lowfx", params.has("lowfx")); g.registry.set("nobake", params.has("nobake")); } },
+    scene: [],
+  });
+  const resize = () => {
+    game.scale.resize(innerWidth * dpr, innerHeight * dpr);
+    game.scale.setZoom(1 / dpr);
+    scene.setInsets(insets());
+  };
+  window.addEventListener("resize", resize);
+
+  await new Promise<void>((resolve) => {
+    scene.hooks = {
+      onPress: () => audio.touch(),
+      onTap,
+      onPassThrough: () => audio.passThrough(),
+      onReady: () => resolve(),
+    };
+    game.scene.add("board", scene, true);
+  });
+  scene.setInsets(insets());
+  scene.setColorAssist(s.colorAssist);
+
+  if (params.has("debug")) debug = mountDebug(scene);
+
+  const startAt = params.get("level");
+  const first = startAt ? Math.max(1, Math.min(Number(startAt) || 1, 999)) : Math.max(1, Math.min(progress.data.current, progress.data.unlocked));
+  if (params.has("daily")) start(fetchLevel("daily", 0));
+  else startIndex(first);
+  platform.gameReady();
+
+  // Idle → hint button pulses.
+  idleTimer = window.setInterval(() => {
+    if (!paused && !ended && performance.now() - lastTapAt > HINT_IDLE_MS && hints.count > 0) ui.pulseHint(true);
+  }, 1000);
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" || e.key === "p") { if (paused) resume(); else pause(); }
+    else if (e.key === "h") useHint();
+  });
+  window.addEventListener("pagehide", () => { if (!ended) telemetry.emit("quit", { remaining: session.state.remaining }); });
+
+  // Automation / QA hooks.
+  (window as unknown as { __chroma: unknown }).__chroma = {
+    level: () => current.def,
+    remaining: () => session.state.remaining,
+    lives: () => session.lives,
+    free: () => session.state.freeLines(),
+    blocked: () => session.state.alive.map((a, i) => (a && session.state.firstBlocker(i) >= 0 ? i : -1)).filter((i) => i >= 0),
+    solution: () => solve(session.state).order,
+    head: (i: number) => scene.headScreen(i),
+    tap: (i: number) => onTap(i),
+    save: () => structuredClone(progress.data),
+    telemetry: () => telemetry.recorder.snapshot(),
+  };
+}
+
+function insets() {
+  const portrait = innerHeight >= innerWidth;
+  return { top: portrait ? 72 : 64, bottom: portrait ? 104 : 24, side: portrait ? 14 : 96 };
+}
+
+void boot();
+void idleTimer;

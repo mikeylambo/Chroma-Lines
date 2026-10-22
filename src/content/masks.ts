@@ -53,7 +53,33 @@ export function buildMask(name: MaskName, w: number, h: number): Uint8Array {
       const v = ((y + 0.5) / h) * 2 - 1;
       out[y * w + x] = shapes[name](u, v) ? 0 : 1;
     }
-  return out;
+  return keepLargestRegion(out, w, h);
+}
+
+/** Drop stray islands so a silhouette reads as one shape. */
+function keepLargestRegion(mask: Uint8Array, w: number, h: number): Uint8Array {
+  const label = new Int32Array(w * h).fill(-1);
+  let best = -1, bestSize = 0, id = 0;
+  for (let s = 0; s < w * h; s++) {
+    if (mask[s] || label[s] >= 0) continue;
+    const stack = [s];
+    label[s] = id;
+    let size = 0;
+    while (stack.length) {
+      const c = stack.pop()!;
+      size++;
+      const x = c % w, y = (c / w) | 0;
+      for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]] as const) {
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const n = ny * w + nx;
+        if (!mask[n] && label[n] < 0) { label[n] = id; stack.push(n); }
+      }
+    }
+    if (size > bestSize) { bestSize = size; best = id; }
+    id++;
+  }
+  for (let c = 0; c < w * h; c++) if (!mask[c] && label[c] !== best) mask[c] = 1;
+  return mask;
 }
 
 export const MASK_NAMES = Object.keys(shapes) as MaskName[];

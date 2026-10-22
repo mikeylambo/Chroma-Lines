@@ -130,3 +130,25 @@ test("solver critical move is free and unlocks the most lines", () => {
     assert.ok(m >= 0 && st.isFree(m));
   }
 });
+
+import { PlaySession } from "../src/sim/session.ts";
+test("session: lives, fail at 0, win when empty, stars by mistakes", async () => {
+  const { starsFor } = await import("../src/meta/progress.ts");
+  const b = hand("mono", [
+    { id: 0, color: 0, dir: 1, cells: [at(5, 0, 2)] },
+    { id: 1, color: 0, dir: 0, cells: [at(5, 2, 0), at(5, 2, 1), at(5, 2, 2)] },
+  ]);
+  const s = new PlaySession(b);
+  assert.equal(s.tap(0).kind, "blocked");
+  assert.equal(s.lives, 2);
+  assert.equal(s.tap(1).kind, "free");
+  const r = s.tap(0);
+  assert.ok(r.kind === "free" && r.won);
+  assert.equal(starsFor(s.mistakes), 2);
+  const f = new PlaySession(b);
+  f.tap(0); f.tap(0);
+  const last = f.tap(0);
+  assert.ok(last.kind === "blocked" && last.failed);
+  assert.equal(f.tap(1).kind, "ignored");
+  assert.deepEqual([starsFor(0), starsFor(1), starsFor(2)], [3, 2, 1]);
+});

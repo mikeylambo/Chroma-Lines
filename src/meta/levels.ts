@@ -29,7 +29,7 @@ export interface LoadedLevel {
 }
 
 interface CurveRow { level: number; seed: number; band: Band; difficulty: number }
-const rows = (curve as { levels: CurveRow[] }).levels;
+const rows = (curve as unknown as { levels: CurveRow[] }).levels;
 
 export function paramsForSpec(spec: LevelSpec): GenParams {
   return {
